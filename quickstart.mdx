@@ -1,80 +1,327 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Guía de Inicio Rápido"
+description: "Configura TMT - Taquilla Física y realiza tu primera venta de entradas en minutos"
 ---
 
-## Get started in three steps
+## Bienvenido a TMT - Taquilla Física
 
-Get your documentation site running locally and make your first customization.
+Esta guía te llevará desde la instalación hasta realizar tu primera venta de entrada, paso a paso.
 
-### Step 1: Set up your local environment
+<Info>
+  **Tiempo estimado**: 15-20 minutos
+</Info>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Antes de Comenzar
+
+Asegúrate de tener instalado:
+
+- **Node.js** (versión 16 o superior)
+- **npm** (incluido con Node.js)
+- Una cuenta de **Firebase** con un proyecto configurado
+- (Opcional) Una cuenta de **Seats.io** para eventos con asientos numerados
+
+## Paso 1: Instalación y Configuración
+
+<Steps>
+  <Step title="Clonar el Repositorio">
+    Clona el proyecto en tu máquina local:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    git clone <repository-url>
+    cd tmt-taquilla-fisica
+    ```
+  </Step>
+  
+  <Step title="Instalar Dependencias">
+    Instala todas las dependencias necesarias:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```bash
+    npm install
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    <Note>
+      El proyecto incluye más de 40 paquetes optimizados para un rendimiento óptimo, incluyendo React 18, Firebase 10, Redux Toolkit, y Seats.io.
+    </Note>
+  </Step>
+  
+  <Step title="Configurar Firebase">
+    Edita el archivo de configuración de Firebase en `src/guards/firebase/firebase.js`:
+    
+    ```javascript src/guards/firebase/firebase.js
+    const firebaseConfig = {
+      apiKey: "tu-api-key",
+      authDomain: "tu-proyecto.firebaseapp.com",
+      projectId: "tu-proyecto-id",
+      storageBucket: "tu-proyecto.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "tu-app-id",
+    };
+    ```
+    
+    <Warning>
+      Nunca compartas estas credenciales públicamente. Considera usar variables de entorno para producción.
+    </Warning>
+  </Step>
+  
+  <Step title="Configurar Clave de Encriptación">
+    En `src/store/Store.js`, actualiza la clave secreta para la encriptación de datos:
+    
+    ```javascript src/store/Store.js
+    transforms: [
+      encryptTransform({
+        secretKey: 'tu-clave-secreta-muy-segura',
+        onError: (error) => {
+          console.error('Encriptación fallida:', error);
+        },
+      }),
+    ],
+    ```
+    
+    <Tip>
+      Usa una clave fuerte y única. Esta clave se utiliza para proteger datos sensibles almacenados en Redux Persist.
+    </Tip>
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Paso 2: Iniciar el Servidor de Desarrollo
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+Inicia la aplicación en modo desarrollo:
 
-### Step 3: Go live
+```bash
+npm run dev
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+La aplicación se abrirá automáticamente en `http://localhost:5173`
 
-## Next steps
+<Info>
+  TMT usa **Vite** como build tool, lo que garantiza un inicio ultrarrápido y hot-reload instantáneo.
+</Info>
 
-Now that you have your docs running, explore these key features:
+## Paso 3: Primer Inicio de Sesión
+
+<Steps>
+  <Step title="Acceder a la Aplicación">
+    Abre tu navegador y ve a `http://localhost:5173`
+    
+    Verás la pantalla de inicio de sesión para taquilleros.
+  </Step>
+  
+  <Step title="Configurar Usuario en Firebase">
+    Antes de iniciar sesión, necesitas crear un usuario en Firebase:
+    
+    1. Ve a la consola de Firebase
+    2. Navega a **Authentication** > **Users**
+    3. Haz clic en **Add user**
+    4. Ingresa email y contraseña
+    5. En **Firestore Database**, crea una colección `users` con un documento para este usuario
+  </Step>
+  
+  <Step title="Iniciar Sesión">
+    Usa las credenciales del usuario que acabas de crear para iniciar sesión en la aplicación.
+  </Step>
+</Steps>
+
+## Paso 4: Configurar Tu Primera Taquilla
+
+<Steps>
+  <Step title="Crear Documento de Taquilla">
+    En Firestore, crea una colección `offices` con la siguiente estructura:
+    
+    ```json
+    {
+      "name": "Taquilla Principal",
+      "location": "Entrada Norte",
+      "active": true,
+      "createdAt": "timestamp",
+      "users": ["user-id-del-taquillero"]
+    }
+    ```
+  </Step>
+  
+  <Step title="Validar Acceso">
+    La aplicación utiliza la función `office_validate` para verificar que el usuario tenga acceso a una taquilla:
+    
+    ```javascript
+    import { office_validate } from '@/guards/firebase/firebase';
+    
+    // Validación automática al iniciar sesión
+    const result = await office_validate({ userId: currentUser.uid });
+    ```
+  </Step>
+</Steps>
+
+## Paso 5: Crear Tu Primer Evento
+
+<Steps>
+  <Step title="Agregar Evento en Firestore">
+    Crea una colección `events` con un documento de ejemplo:
+    
+    ```json
+    {
+      "title": "Concierto de Rock",
+      "date": "2026-04-15T20:00:00Z",
+      "venue": "Auditorio Central",
+      "description": "Gran concierto de rock con bandas locales",
+      "imageUrl": "https://example.com/image.jpg",
+      "active": true,
+      "zones": [
+        {
+          "name": "Platea",
+          "price": 50.00,
+          "available": 100
+        },
+        {
+          "name": "Balcón",
+          "price": 30.00,
+          "available": 50
+        }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Ver el Evento en la Aplicación">
+    Recarga la aplicación y deberías ver tu evento en la lista principal.
+    
+    <Tip>
+      Los eventos se cargan desde Redux y se mantienen en el estado global para acceso rápido.
+    </Tip>
+  </Step>
+</Steps>
+
+## Paso 6: Realizar Tu Primera Venta
+
+<Steps>
+  <Step title="Seleccionar Evento">
+    En la pantalla principal, haz clic en el evento que acabas de crear.
+  </Step>
+  
+  <Step title="Seleccionar Asientos o Zona">
+    - **Con Seats.io**: Verás un mapa interactivo donde puedes seleccionar asientos específicos
+    - **Sin Seats.io**: Selecciona la zona y la cantidad de entradas
+    
+    ```javascript
+    // Ejemplo de selección con Seats.io
+    import { hold_seats_seatsio } from '@/guards/firebase/firebase';
+    
+    const holdSeats = async (seats) => {
+      const result = await hold_seats_seatsio({
+        eventKey: eventId,
+        seats: seats,
+        holdToken: sessionToken
+      });
+    };
+    ```
+  </Step>
+  
+  <Step title="Ingresar Datos del Cliente">
+    Completa el formulario con:
+    - Nombre completo
+    - Email
+    - Teléfono
+    - Tipo de cliente (Regular o Corporativo)
+  </Step>
+  
+  <Step title="Seleccionar Método de Pago">
+    Elige entre:
+    - **Pago móvil** (con IGTF del 3%)
+    - **Tarjeta de crédito/débito** (con IGTF del 3%)
+    - **Efectivo** (sin IGTF)
+    - **Transferencia** (sin IGTF)
+    
+    <Info>
+      El IVA del 16% se calcula automáticamente en todos los casos.
+    </Info>
+  </Step>
+  
+  <Step title="Confirmar y Procesar">
+    Revisa el resumen de la orden:
+    - Entradas seleccionadas
+    - Subtotal
+    - IVA (16%)
+    - IGTF (3% si aplica)
+    - Total a pagar
+    
+    Haz clic en **Confirmar Venta** para procesar la transacción.
+    
+    ```javascript
+    // La orden se procesa con Firebase Functions
+    import { order_created } from '@/guards/firebase/firebase';
+    
+    const processOrder = async (orderData) => {
+      const result = await order_created(orderData);
+      // Envía email de confirmación automáticamente
+    };
+    ```
+  </Step>
+  
+  <Step title="Confirmación y Email">
+    Una vez procesada la venta:
+    - Se genera un código QR único para cada entrada
+    - Se envía un email de confirmación al cliente
+    - Las entradas se marcan como vendidas en Seats.io (si aplica)
+    - Se actualiza el inventario disponible
+    
+    <Tip>
+      El cliente recibirá un email con sus entradas en formato PDF y códigos QR para validación en el evento.
+    </Tip>
+  </Step>
+</Steps>
+
+## Siguientes Pasos
+
+Ahora que has completado tu primera venta, explora más funcionalidades:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Configuración Avanzada" icon="gear" href="/installation">
+    Configura todas las opciones disponibles para tu taquilla
+  </Card>
+  
+  <Card title="Integración con Seats.io" icon="map" href="/integrations/seatsio">
+    Aprende a configurar mapas de asientos interactivos
+  </Card>
+  
+  <Card title="Entradas de Cortesía" icon="gift" href="/features/courtesy-tickets">
+    Gestiona entradas gratuitas y promocionales
+  </Card>
+  
+  <Card title="Clientes Corporativos" icon="briefcase" href="/payments/corporate">
+    Configura precios especiales para empresas
+  </Card>
 </CardGroup>
 
+## Solución de Problemas Comunes
+
+<AccordionGroup>
+  <Accordion title="Error de autenticación de Firebase">
+    Verifica que:
+    - Las credenciales en `firebase.js` sean correctas
+    - Tu proyecto de Firebase tenga Authentication habilitado
+    - El método de autenticación por email/contraseña esté activado
+  </Accordion>
+  
+  <Accordion title="No se cargan los eventos">
+    Asegúrate de que:
+    - La colección `events` existe en Firestore
+    - Los documentos tienen el campo `active: true`
+    - Las reglas de seguridad de Firestore permiten la lectura
+  </Accordion>
+  
+  <Accordion title="Seats.io no funciona">
+    Verifica:
+    - Que tengas una cuenta activa de Seats.io
+    - Las credenciales estén configuradas correctamente
+    - El evento tenga un `eventKey` válido de Seats.io
+  </Accordion>
+  
+  <Accordion title="Error de encriptación en Redux">
+    Si ves errores de encriptación:
+    - Limpia el localStorage: `localStorage.clear()`
+    - Verifica que la `secretKey` esté configurada en Store.js
+    - Recarga la aplicación
+  </Accordion>
+</AccordionGroup>
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  **¿Necesitas más ayuda?** Consulta la [documentación completa](/introduction) o revisa la [guía de instalación](/installation) para configuraciones más avanzadas.
 </Note>

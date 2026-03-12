@@ -1,0 +1,201 @@
+---
+title: 'Gestión de Pagos'
+description: 'Sistema integral de procesamiento de pagos para taquillas físicas'
+icon: 'credit-card'
+---
+
+## Introducción
+
+El sistema de gestión de pagos de TMT permite procesar múltiples métodos de pago simultáneamente, calcular impuestos automáticamente y gestionar transacciones tanto en dólares (USD) como en bolívares (VES).
+
+<Note>
+  El sistema soporta pagos mixtos, permitiendo que un cliente pague con múltiples métodos de pago en una sola transacción.
+</Note>
+
+## Características Principales
+
+<CardGroup cols={2}>
+  <Card title="Múltiples Métodos de Pago" icon="wallet">
+    Soporta Zelle, Pago Móvil, Transferencias, Tarjetas de Crédito/Débito y Efectivo
+  </Card>
+  <Card title="Cálculo Automático de Impuestos" icon="calculator">
+    IVA del 16% e IGTF del 3% calculados automáticamente
+  </Card>
+  <Card title="Precios Corporativos" icon="building">
+    Sistema de precios especiales para clientes corporativos
+  </Card>
+  <Card title="Multi-moneda" icon="dollar-sign">
+    Manejo simultáneo de USD y VES con tasa de cambio actualizada
+  </Card>
+</CardGroup>
+
+## Flujo de Procesamiento de Pagos
+
+El procesamiento de pagos en TMT sigue un flujo estructurado en dos pasos:
+
+### Paso 1: Selección de Asientos
+
+1. El usuario selecciona los asientos deseados
+2. El sistema calcula el subtotal basado en los precios de zona
+3. Si es cliente corporativo, aplica precios corporativos
+4. Los asientos se bloquean temporalmente por 10 minutos
+
+<Info>
+  Los asientos bloqueados tienen un temporizador de 600 segundos (10 minutos) antes de liberarse automáticamente.
+</Info>
+
+### Paso 2: Información de Pago
+
+1. Recopilación de datos del cliente
+2. Selección de métodos de pago
+3. Ingreso de montos por cada método
+4. Cálculo de impuestos (IVA + IGTF si aplica)
+5. Validación de que el total pagado coincida con el monto final
+6. Procesamiento y confirmación de la orden
+
+```javascript CheckOut.js (líneas 256-315)
+const subtotal = calculateSubtotal();
+const taxes = calculateTaxes(subtotal);
+
+let transactions = await Promise.all(filteredPayments.map(async (payments) => {
+  const methodData = additionalPaymentData[payments.payment_method_id] || {};
+  const rawAmount = Number(paymentAmounts[payments.payment_method_id] || 0);
+
+  const amountInUsd = payments.currency === 'USD' ? rawAmount : rawAmount / usdCentralBank;
+
+  // Determinar point_sale_tmt basado en el método de pago
+  let pointSaleTmt = false;
+
+  if (payments.method === "Pago Móvil") {
+    pointSaleTmt = payments.client && payments.client.client_id === "TMT";
+  } else if (payments.method === "Tarjeta de Crédito" || payments.method === "Tarjeta de Debito") {
+    pointSaleTmt = additionalPaymentData[payments.payment_method_id]?.punto_venta === 'tmt';
+  }
+
+  return {
+    amount: rawAmount,
+    amount_currency: payments.currency,
+    amount_exchange: amountInUsd,
+    amount_exchange_rate: payments.currency === 'USD' ? 1 : usdCentralBank,
+    date: serverTimestamp(),
+    payment_data: {
+      ...methodData,
+    },
+    payment_id: payments.payment_method_id,
+    payment_name: payments.name,
+    status: true,
+    point_sale_tmt: pointSaleTmt,
+    custody_account: payments.custody_account
+  }
+}));
+```
+
+## Cálculo de Montos
+
+El sistema utiliza funciones específicas para calcular montos con precisión:
+
+```javascript CheckOut.js (líneas 26-34)
+const truncateDecimals = (number, digits) => {
+  const multiplier = Math.pow(10, digits);
+  return Math.trunc(number * multiplier) / multiplier;
+};
+
+const roundDecimals = (number, digits) => {
+  const multiplier = Math.pow(10, digits);
+  return Math.round(number * multiplier) / multiplier;
+};
+```
+
+<Warning>
+  El subtotal utiliza `truncateDecimals` mientras que el total final usa `roundDecimals` para mayor precisión en el cálculo final.
+</Warning>
+
+## Estructura de la Orden Final
+
+Cada orden procesada incluye:
+
+<ParamField path="amount" type="number">
+  Monto total de la orden en USD
+</ParamField>
+
+<ParamField path="event_id" type="string">
+  ID del evento al que pertenecen los tickets
+</ParamField>
+
+<ParamField path="office_id" type="string">
+  ID de la taquilla donde se realizó la compra
+</ParamField>
+
+<ParamField path="tickets" type="array">
+  Array de tickets con información del comprador y metadata
+</ParamField>
+
+<ParamField path="transactions" type="array">
+  Array de transacciones con métodos de pago y montos
+</ParamField>
+
+<ParamField path="exchange_rate" type="number">
+  Tasa de cambio USD/VES al momento de la compra
+</ParamField>
+
+<ParamField path="is_corporate" type="boolean">
+  Indica si la compra es corporativa
+</ParamField>
+
+## Validación de Pagos
+
+El sistema valida que:
+
+1. Se haya seleccionado al menos un método de pago
+2. El monto total ingresado coincida con el total a pagar
+3. Todos los campos requeridos del método de pago estén completos
+4. Los datos del cliente estén completos
+5. Si es corporativo, los datos de la empresa estén completos
+
+```javascript CheckOut.js (líneas 780-815)
+useEffect(() => {
+  const totalAmount = calculateTotal();
+  const enteredAmount = getTotalEnteredAmount();
+
+  // Verificar datos básicos
+  const basicDataValid = selectedSeats.length > 0 &&
+    selectedPaymentMethods.length > 0 &&
+    formik.values.customer_name.trim() !== '' &&
+    formik.values.customer_email.trim() !== '' &&
+    formik.values.customer_phone.trim() !== '' &&
+    formik.values.customer_id.trim() !== '' &&
+    formik.values.customer_id_type.trim() !== '' &&
+    (clientType !== 'corporativo' || (
+      formik.values.company_name.trim() !== '' &&
+      formik.values.company_rif.trim() !== '' &&
+      formik.values.company_rif_type.trim() !== '' &&
+      formik.values.company_address.trim() !== ''
+    )) &&
+    Math.abs(enteredAmount - finalTotalAmount) < 0.01;
+
+  // Verificar campos adicionales de los métodos de pago
+  const paymentFieldsValid = arePaymentMethodFieldsComplete();
+
+  // Combinar todas las validaciones
+  const isValid = basicDataValid && paymentFieldsValid;
+
+  setIsFormValid(isValid);
+}, [selectedSeats, selectedPaymentMethods, formik.values, paymentAmounts, clientType, finalTotalAmount, additionalPaymentData]);
+```
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Métodos de Pago" icon="wallet" href="/payments/methods">
+    Conoce todos los métodos de pago disponibles y sus requerimientos
+  </Card>
+  <Card title="Cálculo de Impuestos" icon="percent" href="/payments/taxes">
+    Entiende cómo se calculan el IVA y el IGTF
+  </Card>
+  <Card title="Precios Corporativos" icon="building" href="/payments/corporate">
+    Descubre cómo funcionan los precios para clientes corporativos
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/payments">
+    Documentación técnica de las APIs de pago
+  </Card>
+</CardGroup>

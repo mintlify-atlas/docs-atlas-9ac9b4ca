@@ -1,0 +1,412 @@
+---
+title: 'Slices de Redux'
+description: 'Documentación detallada de todos los slices de Redux en la aplicación'
+---
+
+## ¿Qué es un Slice?
+
+Un **slice** en Redux Toolkit es una colección de lógica de Redux para una característica específica de tu aplicación. Cada slice contiene:
+
+- Estado inicial
+- Reducers (funciones que modifican el estado)
+- Actions (generadas automáticamente)
+
+<Note>
+  Redux Toolkit genera automáticamente action creators para cada reducer que definas en un slice.
+</Note>
+
+## Auth Slice
+
+Gestiona el estado de autenticación del usuario.
+
+### Estado Inicial
+
+```javascript src/store/apps/auth/authSlice.js
+const initialState = {
+  isAuthenticated: false,
+  isInitialized: false,
+  user: null,
+};
+```
+
+### Reducers y Actions
+
+<Accordion title="authStateChanged">
+  Actualiza el estado de autenticación del usuario. Convierte automáticamente los timestamps de Firebase a objetos Date.
+
+  ```javascript src/store/apps/auth/authSlice.js
+  reducers: {
+    authStateChanged(state, action) {
+      const { isAuthenticated, user } = action.payload;
+
+      if (user !== null) {
+        user.date.last_update = convertTimestamp(user.date?.last_update);
+        user.date.last_access = convertTimestamp(user.date?.last_access);
+        user.date.create = convertTimestamp(user.date?.create);
+      }
+
+      state.isAuthenticated = isAuthenticated;
+      state.isInitialized = true;
+      state.user = user;
+    },
+  }
+  ```
+
+  **Uso:**
+  ```javascript
+  import { authStateChanged } from '../store/apps/auth/authSlice';
+  
+  dispatch(authStateChanged({
+    isAuthenticated: true,
+    user: userData
+  }));
+  ```
+</Accordion>
+
+### Estructura del Usuario
+
+El objeto `user` contiene:
+
+- `date.last_update`: Última actualización del perfil
+- `date.last_access`: Último acceso a la aplicación
+- `date.create`: Fecha de creación de la cuenta
+- Otros campos específicos del usuario (nombre, email, rol, etc.)
+
+## Office Slice
+
+Gestiona el estado de autenticación de la taquilla física.
+
+### Estado Inicial
+
+```javascript src/store/apps/office/officeSlice.js
+const initialState = {
+  isAuthenticated: false,
+  isInitialized: false,
+  office: null,
+};
+```
+
+### Reducers y Actions
+
+<Accordion title="authOfficeStateChanged">
+  Actualiza el estado de autenticación de la taquilla. Similar a `authStateChanged` pero para taquillas.
+
+  ```javascript src/store/apps/office/officeSlice.js
+  reducers: {
+    authOfficeStateChanged(state, action) {
+      const { isAuthenticated, office } = action.payload;
+
+      if (office !== null) {
+        office.date.updated = convertTimestamp(office.date?.updated);
+        office.date.created = convertTimestamp(office.date?.created);
+      }
+
+      state.isAuthenticated = isAuthenticated;
+      state.isInitialized = true;
+      state.office = office;
+    },
+  }
+  ```
+
+  **Uso:**
+  ```javascript
+  import { authOfficeStateChanged } from '../store/apps/office/officeSlice';
+  
+  dispatch(authOfficeStateChanged({
+    isAuthenticated: true,
+    office: officeData
+  }));
+  ```
+</Accordion>
+
+<Warning>
+  Las taquillas y los usuarios son entidades separadas en el sistema. Una taquilla representa un punto de venta físico.
+</Warning>
+
+## Event Slice
+
+Almacena los datos del evento actualmente seleccionado.
+
+### Estado Inicial
+
+```javascript src/store/apps/event/eventSlice.js
+const initialState = {
+  event: null,
+};
+```
+
+### Reducers y Actions
+
+<Accordion title="getEventData">
+  Actualiza los datos del evento, incluyendo la conversión de timestamps en el ledger (libro de contabilidad).
+
+  ```javascript src/store/apps/event/eventSlice.js
+  reducers: {
+    getEventData(state, action) {
+      const { event } = action.payload;
+
+      if (event !== null) {
+        event.ledger.map((element, i) => {
+          element.date = convertTimestamp(element.date)
+          event.ledger[i] = element;
+        })
+      }
+
+      state.event = event;
+    },
+  }
+  ```
+
+  **Uso:**
+  ```javascript
+  import { getEventData } from '../store/apps/event/eventSlice';
+  
+  dispatch(getEventData({ event: eventData }));
+  ```
+</Accordion>
+
+### Estructura del Event
+
+El objeto `event` incluye:
+
+- `ledger`: Array con el registro contable del evento
+- Cada entrada del ledger tiene una propiedad `date` convertida a formato legible
+- Información del evento (nombre, fecha, venue, etc.)
+
+## Setup Slice
+
+Gestiona la configuración global de la aplicación, incluyendo tipos de pago y tasas de cambio.
+
+### Estado Inicial
+
+```javascript src/store/setup/SetupSlice.js
+const initialState = {
+  Setup: {},
+};
+```
+
+### Reducers y Actions
+
+<Accordion title="getSetup">
+  Actualiza la configuración global de la aplicación.
+
+  ```javascript src/store/setup/SetupSlice.js
+  reducers: {
+    getSetup: (state, action) => {
+      state.Setup = action.payload;
+    },
+  }
+  ```
+</Accordion>
+
+### Thunk Asíncrono: fetchSetup
+
+Este slice incluye un **thunk** para obtener datos de Firebase:
+
+```javascript src/store/setup/SetupSlice.js
+export const fetchSetup = () => async (dispatch) => {
+  try {
+    const query = await getDocs(collection(db, 'data'));
+    const query2 = await getDocs(collection(db, 'data/payment_types/payment_data'));
+
+    let DataFinal = {};
+    let PaymentFinal = [];
+
+    query.docs.forEach((e) => {
+      const data = e.data();
+
+      if (e.id === 'exchange_rates') {
+        data.date.last_update = convertTimestamp(data.date.last_update);
+      }
+
+      DataFinal[e.id] = data;
+    })
+
+    query2.docs.forEach((e) => {
+      const data = e.data();
+
+      data.date.created = convertTimestamp(data.date.created);
+      data.date.updated = convertTimestamp(data.date.updated);
+
+      PaymentFinal.push(data);
+    })
+
+    DataFinal.payment_data = PaymentFinal
+
+    dispatch(getSetup(DataFinal));
+  } catch (error) {
+    console.log("🚀 ~ fetchSetup ~ error:", error)
+  }
+};
+```
+
+**Uso del thunk:**
+
+```javascript
+import { fetchSetup } from '../store/setup/SetupSlice';
+
+function App() {
+  const dispatch = useDispatch();
+  
+  useEffect(() => {
+    dispatch(fetchSetup());
+  }, []);
+}
+```
+
+<Note>
+  Los thunks permiten ejecutar lógica asíncrona antes de despachar acciones. Son ideales para llamadas a APIs o Firebase.
+</Note>
+
+## Loading Slice
+
+Controla el estado de carga global de la aplicación.
+
+### Estado Inicial
+
+```javascript src/store/apps/loading/loadingSlice.js
+const initialState = {
+  loading: false
+};
+```
+
+### Reducers y Actions
+
+<Tabs>
+  <Tab title="setLoadingData">
+    Establece el estado de carga.
+
+    ```javascript src/store/apps/loading/loadingSlice.js
+    setLoadingData: (state, action) => {
+      state.loading = action.payload.loading
+    }
+    ```
+
+    **Uso:**
+    ```javascript
+    import { setLoadingData } from '../store/apps/loading/loadingSlice';
+    
+    dispatch(setLoadingData({ loading: true }));
+    ```
+  </Tab>
+  
+  <Tab title="resetLoadingData">
+    Resetea el estado de carga a `false`.
+
+    ```javascript src/store/apps/loading/loadingSlice.js
+    resetLoadingData: (state, action) => {
+      state.loading = false
+    }
+    ```
+
+    **Uso:**
+    ```javascript
+    import { resetLoadingData } from '../store/apps/loading/loadingSlice';
+    
+    dispatch(resetLoadingData());
+    ```
+  </Tab>
+</Tabs>
+
+### Patrón de Uso Común
+
+```javascript
+import { setLoadingData, resetLoadingData } from '../store/apps/loading/loadingSlice';
+
+const handleAsyncOperation = async () => {
+  dispatch(setLoadingData({ loading: true }));
+  
+  try {
+    await someAsyncOperation();
+  } finally {
+    dispatch(resetLoadingData());
+  }
+};
+```
+
+## Emails Slice
+
+Rastreador de correos electrónicos enviados para evitar duplicados.
+
+### Estado Inicial
+
+```javascript src/store/apps/emails/emailsSlice.js
+const initialState = {
+  sentOrderEmails: [],
+};
+```
+
+### Reducers y Actions
+
+<Tabs>
+  <Tab title="markOrderEmailSent">
+    Marca un pedido como que ya se envió su correo.
+
+    ```javascript src/store/apps/emails/emailsSlice.js
+    markOrderEmailSent(state, action) {
+      const orderId = action.payload;
+      if (!state.sentOrderEmails.includes(orderId)) {
+        state.sentOrderEmails.push(orderId);
+      }
+    }
+    ```
+
+    **Uso:**
+    ```javascript
+    import { markOrderEmailSent } from '../store/apps/emails/emailsSlice';
+    
+    dispatch(markOrderEmailSent('order-123'));
+    ```
+  </Tab>
+  
+  <Tab title="clearSentEmails">
+    Limpia la lista de correos enviados.
+
+    ```javascript src/store/apps/emails/emailsSlice.js
+    clearSentEmails(state) {
+      state.sentOrderEmails = [];
+    }
+    ```
+
+    **Uso:**
+    ```javascript
+    import { clearSentEmails } from '../store/apps/emails/emailsSlice';
+    
+    dispatch(clearSentEmails());
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Este slice previene el envío duplicado de correos al mantener un registro de los pedidos que ya han sido notificados.
+</Note>
+
+## Patrones de Conversión de Timestamps
+
+Todos los slices que manejan datos de Firebase utilizan la función `convertTimestamp` para transformar los timestamps de Firestore en objetos Date de JavaScript:
+
+```javascript
+import { convertTimestamp } from '../../utils/convertTimestamp';
+
+// En los reducers
+user.date.create = convertTimestamp(user.date?.create);
+```
+
+Esto asegura que las fechas sean fácilmente manipulables en la aplicación.
+
+## Mejores Prácticas
+
+<CardGroup cols={2}>
+  <Card title="Inmutabilidad" icon="lock">
+    Redux Toolkit usa Immer, permitiendo mutaciones directas en los reducers que se convierten en actualizaciones inmutables.
+  </Card>
+  <Card title="Actions Tipadas" icon="code">
+    Exporta siempre las actions de cada slice para mantener consistencia en toda la aplicación.
+  </Card>
+  <Card title="Estado Normalizado" icon="table">
+    Mantén el estado lo más plano posible para facilitar las actualizaciones.
+  </Card>
+  <Card title="Thunks para Async" icon="clock">
+    Usa thunks para toda lógica asíncrona como llamadas a Firebase.
+  </Card>
+</CardGroup>

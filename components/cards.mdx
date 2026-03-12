@@ -1,0 +1,54 @@
+---
+title: "Cards"
+description: "Componentes de tarjeta para agrupar contenido relacionado"
+---
+
+## Card Component
+
+El componente `Card` proporciona una estructura flexible para mostrar contenido agrupado:
+
+```javascript src/components/ui/Card.js
+import { cn } from "../../utils/cn";
+
+const Card = React.forwardRef(({ className, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}
+    {...props}
+  />
+));
+
+const CardHeader = React.forwardRef(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />
+));
+
+const CardContent = React.forwardRef(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />
+));
+
+const CardFooter = React.forwardRef(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("flex items-center p-6 pt-0", className)} {...props} />
+));
+```
+
+## Uso
+
+```javascript
+import { Card, CardHeader, CardContent, CardFooter } from '@/components/ui/Card';
+
+<Card>
+  <CardHeader>
+    <h3>Título</h3>
+  </CardHeader>
+  <CardContent>
+    <p>Contenido de la tarjeta</p>
+  </CardContent>
+  <CardFooter>
+    <Button>Acción</Button>
+  </CardFooter>
+</Card>
+```
+
+<Info>
+Ver ejemplo real en [Offices](/features/offices).
+</Info>

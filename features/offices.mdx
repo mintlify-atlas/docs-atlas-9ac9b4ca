@@ -1,0 +1,464 @@
+---
+title: "Gestión de Taquillas"
+description: "Sistema de autenticación en taquillas físicas con control de acceso por PIN"
+---
+
+## Introducción
+
+TMT soporta múltiples taquillas físicas con control de acceso individualizado. Cada operador puede tener acceso a una o más taquillas, y debe autenticarse específicamente en cada una antes de comenzar a vender tickets.
+
+<Info>
+La autenticación en taquilla es **adicional** a la autenticación de usuario. Un operador debe primero iniciar sesión con su cuenta de usuario, y luego seleccionar y autenticarse en una taquilla.
+</Info>
+
+## Flujo de Autenticación en Taquilla
+
+<Steps>
+  <Step title="Login de Usuario">
+    El operador inicia sesión con su cuenta de Firebase en `/auth/login`
+  </Step>
+  
+  <Step title="Selección de Taquilla">
+    El sistema muestra las taquillas físicas a las que el usuario tiene acceso en `/taquillas`
+  </Step>
+  
+  <Step title="Autenticación con PIN">
+    El operador ingresa el PIN de la taquilla seleccionada
+  </Step>
+  
+  <Step title="Validación">
+    El sistema valida el PIN mediante la Cloud Function `office_validate`
+  </Step>
+  
+  <Step title="Acceso Completo">
+    Una vez autenticado, el operador puede acceder a eventos y vender tickets
+  </Step>
+</Steps>
+
+## Componente: Offices
+
+El componente principal maneja la selección y autenticación:
+
+```javascript src/views/offices/Offices.js
+import { office_validate } from '../../guards/firebase/firebase';
+import { authOfficeStateChanged } from '../../store/apps/office/officeSlice';
+
+const Offices = () => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const user = useSelector((state) => state.auth.user);
+
+  const [password, setPassword] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [activeOffice, setActiveOffice] = useState(null);
+  const [offices, setOffices] = useState([]);
+
+  // Cargar taquillas del usuario
+  useEffect(() => {
+    const fetchData = async () => {
+      const querySnapshot = await getDocs(
+        collection(db, `u_collaborators/${user.uid}/offices`)
+      );
+
+      if (!querySnapshot.empty) {
+        const offices = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })).filter((office) => office.office_type === "Física");
+        
+        setOffices(offices);
+      }
+    };
+
+    fetchData();
+  }, [user.uid]);
+
+  // Manejar login en taquilla
+  const handleLogin = async (id) => {
+    try {
+      setIsLoggingIn(true);
+
+      const validateUserPlatform = await office_validate({
+        idoffice: id,
+        pin: password,
+        idcollaborators: user.uid,
+      });
+
+      if (validateUserPlatform.data.valido) {
+        const querySnapshot = await getDoc(doc(db, "offices", id));
+
+        dispatch(authOfficeStateChanged({
+          isAuthenticated: true,
+          office: {
+            id: querySnapshot.id,
+            ...querySnapshot.data(),
+          },
+        }));
+
+        toast.success('Sesión Iniciada en taquilla exitosamente');
+        navigate('/eventos');
+      } else {
+        toast.error('Contraseña equivocada');
+        setIsLoggingIn(false);
+      }
+    } catch (err) {
+      console.error(err);
+      setIsLoggingIn(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Taquillas</h2>
+      <p>Seleccione una taquilla</p>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {offices.map((office, index) => (
+          <Card key={index}>
+            <div className="flex items-start space-x-4">
+              <div className="bg-purple-600 rounded-full p-2">
+                <Ticket className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3>{office.name}</h3>
+                <p>Toque para seleccionar</p>
+              </div>
+            </div>
+            
+            {activeOffice === index && (
+              <div className="mt-4 flex space-x-2">
+                <Input
+                  type="password"
+                  placeholder="Contraseña"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={isLoggingIn}
+                />
+                <Button
+                  onClick={() => handleLogin(office.id)}
+                  disabled={isLoggingIn || !password}
+                >
+                  {isLoggingIn ? <Loader2 /> : <ArrowRight />}
+                </Button>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+};
+```
+
+## Estructura de Datos en Firestore
+
+### Colección de Colaboradores
+
+```
+u_collaborators/{userId}/offices/{officeId}
+```
+
+```json
+{
+  "id": "office_123",
+  "name": "Taquilla Principal",
+  "office_type": "Física",
+  "permissions": ["sell_tickets", "courtesy_tickets"],
+  "active": true
+}
+```
+
+<Note>
+Los operadores solo ven las taquillas donde `office_type === "Física"`. Las taquillas virtuales/online no aparecen en este selector.
+</Note>
+
+### Documento de Taquilla
+
+```
+offices/{officeId}
+```
+
+```json
+{
+  "name": "Taquilla Principal",
+  "address": {
+    "line": "Calle Principal #123",
+    "zipcode": "1050",
+    "city": "Caracas",
+    "country": "Venezuela"
+  },
+  "office_type": "Física",
+  "pin": "1234",
+  "status": "active",
+  "events": [],
+  "payment_methods": []
+}
+```
+
+<Warning>
+El PIN se almacena en texto plano en este sistema. En producción, considera usar hashing (bcrypt) para mayor seguridad.
+</Warning>
+
+## Cloud Function: office_validate
+
+La validación del PIN se realiza en el backend:
+
+```javascript src/guards/firebase/firebase.js
+export const office_validate = httpsCallable(functions, 'office_validate');
+
+// Uso
+const result = await office_validate({
+  idoffice: 'office_123',
+  pin: '1234',
+  idcollaborators: 'user_456'
+});
+
+if (result.data.valido) {
+  // Acceso concedido
+}
+```
+
+### Respuesta de la Función
+
+```json
+{
+  "valido": true,
+  "office": {
+    "id": "office_123",
+    "name": "Taquilla Principal"
+  }
+}
+```
+
+## Redux: Almacenamiento de Taquilla
+
+La taquilla autenticada se almacena en Redux:
+
+```javascript src/store/apps/office/officeSlice.js
+import { createSlice } from '@reduxjs/toolkit';
+
+const officeSlice = createSlice({
+  name: 'office',
+  initialState: {
+    isAuthenticated: false,
+    office: null,
+  },
+  reducers: {
+    authOfficeStateChanged: (state, action) => {
+      state.isAuthenticated = action.payload.isAuthenticated;
+      state.office = action.payload.office;
+    },
+  },
+});
+```
+
+### Uso en Componentes
+
+```javascript
+import { useSelector } from 'react-redux';
+
+function EventsList() {
+  const officeAuth = useSelector((state) => state.office);
+  
+  if (!officeAuth.isAuthenticated) {
+    return <Navigate to="/taquillas" />;
+  }
+  
+  console.log(officeAuth.office.name); // "Taquilla Principal"
+}
+```
+
+## Guards de Protección
+
+Dos guards protegen las rutas que requieren autenticación en taquilla:
+
+### OfficeAuth
+
+Permite acceso a la selección de taquilla solo si el usuario está autenticado:
+
+```javascript src/guards/authGuard/OfficeAuth.js
+const OfficeAuth = ({ children }) => {
+  const auth = useSelector((state) => state.auth);
+  
+  if (!auth.isAuthenticated) {
+    return <Navigate to="/auth/login" />;
+  }
+  
+  return <>{children}</>;
+};
+```
+
+### OfficeGuard
+
+Requiere autenticación en taquilla para acceder a funciones de venta:
+
+```javascript src/guards/authGuard/OfficeGuard.js
+const OfficeGuard = ({ children }) => {
+  const officeAuth = useSelector((state) => state.office);
+  
+  if (!officeAuth.isAuthenticated) {
+    return <Navigate to="/taquillas" />;
+  }
+  
+  return <>{children}</>;
+};
+```
+
+## Experiencia de Usuario
+
+El componente utiliza Framer Motion para animaciones suaves:
+
+```javascript
+import { motion, AnimatePresence } from 'framer-motion';
+
+<motion.div
+  layout
+  transition={{ duration: 0.3 }}
+>
+  <Card onClick={() => handleOfficeClick(index)}>
+    {/* Contenido */}
+  </Card>
+</motion.div>
+
+<AnimatePresence>
+  {activeOffice === index && (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+    >
+      {/* Input de PIN */}
+    </motion.div>
+  )}
+</AnimatePresence>
+```
+
+## Múltiples Taquillas
+
+Un operador puede tener acceso a múltiples taquillas:
+
+<CardGroup cols={2}>
+  <Card title="Taquilla Principal" icon="1">
+    Taquilla física en el venue principal
+  </Card>
+  <Card title="Taquilla Norte" icon="2">
+    Taquilla secundaria en entrada norte
+  </Card>
+  <Card title="Taquilla VIP" icon="star">
+    Taquilla especializada para clientes VIP
+  </Card>
+  <Card title="Taquilla Móvil" icon="truck">
+    Taquilla portátil para eventos especiales
+  </Card>
+</CardGroup>
+
+## Cambio de Taquilla
+
+Para cambiar de taquilla durante la sesión:
+
+```javascript
+const switchOffice = () => {
+  // Limpiar estado de taquilla
+  dispatch(authOfficeStateChanged({
+    isAuthenticated: false,
+    office: null
+  }));
+  
+  // Navegar a selector
+  navigate('/taquillas');
+};
+```
+
+<Info>
+El cambio de taquilla **no** cierra la sesión del usuario. Solo limpia el estado de la taquilla actual.
+</Info>
+
+## Seguridad y Mejores Prácticas
+
+<AccordionGroup>
+  <Accordion title="Rotación de PINs">
+    Cambia los PINs de las taquillas regularmente (cada 1-3 meses) para mayor seguridad.
+  </Accordion>
+  
+  <Accordion title="PINs Únicos">
+    Cada taquilla debe tener un PIN diferente. Nunca reutilices PINs entre taquillas.
+  </Accordion>
+  
+  <Accordion title="Auditoría de Accesos">
+    ```javascript
+    // Registrar acceso en Firestore
+    await addDoc(collection(db, 'office_access_log'), {
+      user_id: user.uid,
+      office_id: office.id,
+      timestamp: serverTimestamp(),
+      ip_address: clientIp
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Timeout de Sesión">
+    Implementa timeout automático después de inactividad:
+    ```javascript
+    useIdleTimer({
+      timeout: 15 * 60 * 1000, // 15 minutos
+      onIdle: () => {
+        dispatch(authOfficeStateChanged({ 
+          isAuthenticated: false, 
+          office: null 
+        }));
+        navigate('/taquillas');
+      }
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Configuración de Taquilla
+
+Cada taquilla puede tener configuración personalizada:
+
+```json
+{
+  "name": "Taquilla Principal",
+  "settings": {
+    "allow_courtesy": true,
+    "allow_corporate": true,
+    "max_tickets_per_transaction": 10,
+    "require_supervisor_approval": false,
+    "allowed_payment_methods": [
+      "cash",
+      "credit_card",
+      "debit_card",
+      "mobile_payment"
+    ],
+    "printer_config": {
+      "type": "thermal",
+      "ip": "192.168.1.100"
+    }
+  }
+}
+```
+
+## Reportes por Taquilla
+
+Cada taquilla mantiene sus propias métricas:
+
+- Tickets vendidos por día/semana/mes
+- Ingresos totales por método de pago
+- Número de transacciones
+- Tiempo promedio por venta
+- Cortesías emitidas
+
+## Próximos Pasos
+
+<CardGroup cols={3}>
+  <Card title="Autenticación" icon="lock" href="/auth/overview">
+    Flujo completo de autenticación
+  </Card>
+  <Card title="Guards" icon="shield" href="/auth/guards">
+    Sistema de protección de rutas
+  </Card>
+  <Card title="Permisos" icon="user-shield" href="/auth/permissions">
+    Control de acceso por rol
+  </Card>
+</CardGroup>

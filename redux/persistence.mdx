@@ -1,0 +1,469 @@
+---
+title: 'Persistencia del Estado'
+description: 'Configuración de redux-persist y encriptación del estado'
+---
+
+## Introducción
+
+TMT utiliza **redux-persist** para mantener el estado de Redux entre sesiones del navegador. Además, implementa encriptación para proteger datos sensibles almacenados en el navegador.
+
+## ¿Por qué Persistencia?
+
+La persistencia del estado permite:
+
+<CardGroup cols={2}>
+  <Card title="Experiencia de Usuario" icon="user">
+    Los usuarios permanecen autenticados entre sesiones
+  </Card>
+  <Card title="Performance" icon="gauge-high">
+    Reduce llamadas innecesarias a Firebase al cargar la aplicación
+  </Card>
+  <Card title="Offline First" icon="wifi-slash">
+    La aplicación mantiene funcionalidad básica sin conexión
+  </Card>
+  <Card title="Estado Consistente" icon="check-double">
+    Preserva el estado de la taquilla y eventos activos
+  </Card>
+</CardGroup>
+
+## Configuración de Persistencia
+
+La configuración de persistencia se define en `src/store/Store.js`:
+
+```javascript src/store/Store.js
+import storage from "redux-persist/lib/storage";
+import { persistReducer, persistStore } from "redux-persist";
+import { encryptTransform } from "redux-persist-transform-encrypt";
+
+const persistConfig = {
+  key: "root",
+  storage,
+  whitelist: ["auth", "office", "event", "setup", "loading", "emails"],
+  transforms: [
+    encryptTransform({
+      secretKey: '',
+      onError: (error) => {
+        console.error('Encriptación fallida:', error);
+      },
+    }),
+  ],
+};
+```
+
+### Parámetros de Configuración
+
+<Accordion title="key">
+  La clave bajo la cual se almacenará el estado en el storage del navegador.
+  
+  ```javascript
+  key: "root"
+  ```
+  
+  El estado se guardará en `localStorage` bajo la clave `persist:root`.
+</Accordion>
+
+<Accordion title="storage">
+  Define el motor de almacenamiento a utilizar.
+  
+  ```javascript
+  import storage from "redux-persist/lib/storage";
+  ```
+  
+  Por defecto usa `localStorage`. Otras opciones incluyen:
+  - `sessionStorage`: Se limpia al cerrar el navegador
+  - `AsyncStorage`: Para React Native
+  - Implementaciones personalizadas
+</Accordion>
+
+<Accordion title="whitelist">
+  Array de slices que se deben persistir. Solo los slices en esta lista se guardarán.
+  
+  ```javascript
+  whitelist: ["auth", "office", "event", "setup", "loading", "emails"]
+  ```
+  
+  <Note>
+    Si no se especifica whitelist, **todos** los slices se persistirán. Usar whitelist es una buena práctica para evitar almacenar datos innecesarios.
+  </Note>
+</Accordion>
+
+<Accordion title="transforms">
+  Transformaciones aplicadas al estado antes de persistir y después de rehidratar.
+  
+  ```javascript
+  transforms: [
+    encryptTransform({
+      secretKey: '',
+      onError: (error) => {
+        console.error('Encriptación fallida:', error);
+      },
+    }),
+  ]
+  ```
+  
+  TMT usa `redux-persist-transform-encrypt` para encriptar el estado antes de guardarlo.
+</Accordion>
+
+## Encriptación del Estado
+
+La encriptación es crucial para proteger datos sensibles como información de usuarios y taquillas.
+
+### Configuración de Encriptación
+
+```javascript src/store/Store.js
+import { encryptTransform } from "redux-persist-transform-encrypt";
+
+const persistConfig = {
+  // ...
+  transforms: [
+    encryptTransform({
+      secretKey: '',
+      onError: (error) => {
+        console.error('Encriptación fallida:', error);
+      },
+    }),
+  ],
+};
+```
+
+<Warning>
+  En el código actual, `secretKey` está vacío. En producción, deberías usar una clave secreta robusta almacenada en variables de entorno.
+</Warning>
+
+### Mejores Prácticas de Seguridad
+
+```javascript
+// .env
+REACT_APP_PERSIST_SECRET_KEY=tu-clave-secreta-muy-segura
+
+// Store.js
+const persistConfig = {
+  transforms: [
+    encryptTransform({
+      secretKey: process.env.REACT_APP_PERSIST_SECRET_KEY,
+      onError: (error) => {
+        console.error('Encriptación fallida:', error);
+      },
+    }),
+  ],
+};
+```
+
+<Note>
+  La encriptación del lado del cliente no es infalible, pero añade una capa adicional de seguridad contra accesos no autorizados al localStorage.
+</Note>
+
+## Aplicar Persistencia al Reducer
+
+Una vez configurado, el reducer se envuelve con `persistReducer`:
+
+```javascript src/store/Store.js
+const rootReducer = (state, action) => {
+  if (action.type === LOGOUT) {
+    storage.removeItem('persist:root');
+    state = undefined;
+  }
+  return appReducer(state, action);
+};
+
+const persistedReducer = persistReducer(persistConfig, rootReducer);
+
+export const store = configureStore({
+  reducer: persistedReducer,
+  // ...
+});
+```
+
+## Inicializar el Persistor
+
+El persistor maneja la rehidratación del estado al cargar la aplicación:
+
+```javascript src/store/Store.js
+import { persistStore } from "redux-persist";
+
+export const persistor = persistStore(store);
+```
+
+### Integración en la Aplicación
+
+En tu archivo principal (generalmente `index.js` o `App.js`):
+
+```javascript
+import { Provider } from 'react-redux';
+import { PersistGate } from 'redux-persist/integration/react';
+import { store, persistor } from './store/Store';
+
+function App() {
+  return (
+    <Provider store={store}>
+      <PersistGate loading={<LoadingSpinner />} persistor={persistor}>
+        <YourApp />
+      </PersistGate>
+    </Provider>
+  );
+}
+```
+
+<Accordion title="PersistGate">
+  El componente `PersistGate` retrasa la renderización de la aplicación hasta que el estado persistido se haya recuperado del storage.
+  
+  **Props:**
+  - `loading`: Componente a mostrar mientras se rehidrata el estado
+  - `persistor`: El objeto persistor exportado del store
+  
+  ```javascript
+  <PersistGate loading={<LoadingSpinner />} persistor={persistor}>
+    <YourApp />
+  </PersistGate>
+  ```
+</Accordion>
+
+## Middleware de Persistencia
+
+Redux Persist despacha acciones específicas durante su ciclo de vida. El store debe configurarse para ignorarlas en las verificaciones de serialización:
+
+```javascript src/store/Store.js
+import {
+  FLUSH,
+  REHYDRATE,
+  PAUSE,
+  PERSIST,
+  PURGE,
+  REGISTER,
+} from "redux-persist";
+
+export const store = configureStore({
+  reducer: persistedReducer,
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+      },
+    }),
+});
+```
+
+### Acciones de Redux Persist
+
+<Tabs>
+  <Tab title="REHYDRATE">
+    Se despacha cuando el estado persistido se ha cargado y está listo para fusionarse con el estado inicial.
+    
+    ```javascript
+    {
+      type: 'persist/REHYDRATE',
+      payload: { /* estado persistido */ }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="PERSIST">
+    Se despacha cuando la persistencia comienza.
+    
+    ```javascript
+    {
+      type: 'persist/PERSIST'
+    }
+    ```
+  </Tab>
+  
+  <Tab title="PURGE">
+    Se despacha para limpiar el estado persistido del storage.
+    
+    ```javascript
+    {
+      type: 'persist/PURGE'
+    }
+    ```
+  </Tab>
+  
+  <Tab title="FLUSH">
+    Fuerza la escritura inmediata del estado al storage.
+    
+    ```javascript
+    {
+      type: 'persist/FLUSH'
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Limpieza del Estado Persistido
+
+La acción `LOGOUT` limpia completamente el estado persistido:
+
+```javascript src/store/Store.js
+const LOGOUT = 'LOGOUT';
+
+const rootReducer = (state, action) => {
+  if (action.type === LOGOUT) {
+    storage.removeItem('persist:root');
+    state = undefined;
+  }
+  return appReducer(state, action);
+};
+
+export const logout = () => ({ type: LOGOUT });
+```
+
+### ¿Cómo Funciona?
+
+1. **Acción LOGOUT despachada**: Usuario cierra sesión
+2. **Eliminar del storage**: `storage.removeItem('persist:root')` limpia localStorage
+3. **Resetear estado**: `state = undefined` reinicia todo el estado
+4. **Rehidratación limpia**: En el próximo inicio, el estado comienza desde cero
+
+### Uso Práctico
+
+```javascript
+import { useDispatch } from 'react-redux';
+import { logout } from '../store/Store';
+import { useNavigate } from 'react-router-dom';
+
+function LogoutButton() {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  
+  const handleLogout = async () => {
+    // Cerrar sesión en Firebase
+    await signOut(auth);
+    
+    // Limpiar estado de Redux
+    dispatch(logout());
+    
+    // Redirigir al login
+    navigate('/login');
+  };
+  
+  return <button onClick={handleLogout}>Cerrar Sesión</button>;
+}
+```
+
+## Depuración del Estado Persistido
+
+Puedes inspeccionar el estado persistido directamente en las herramientas de desarrollador del navegador:
+
+### Inspeccionar en Consola
+
+```javascript
+// Ver el estado persistido encriptado
+console.log(localStorage.getItem('persist:root'));
+
+// Limpiar manualmente el estado persistido
+localStorage.removeItem('persist:root');
+location.reload();
+```
+
+### Redux DevTools
+
+Redux DevTools muestra el estado **después** de la rehidratación:
+
+1. Instala la extensión Redux DevTools
+2. Abre las herramientas de desarrollador
+3. Ve a la pestaña Redux
+4. Observa la acción `persist/REHYDRATE` al cargar la página
+
+<Note>
+  El estado en Redux DevTools está **desencriptado**. El estado en localStorage está **encriptado**.
+</Note>
+
+## Problemas Comunes
+
+<Accordion title="Estado no se persiste">
+  **Causa**: El slice no está en la whitelist.
+  
+  **Solución**: Añade el slice a la whitelist en `persistConfig`:
+  ```javascript
+  whitelist: ["auth", "office", "event", "setup", "loading", "emails", "tuNuevoSlice"]
+  ```
+</Accordion>
+
+<Accordion title="Error de serialización">
+  **Causa**: Redux Persist despacha acciones no serializables.
+  
+  **Solución**: Asegúrate de ignorar las acciones de persist en el middleware:
+  ```javascript
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+      },
+    }),
+  ```
+</Accordion>
+
+<Accordion title="Estado corrupto después de actualización">
+  **Causa**: Cambios en la estructura del estado entre versiones.
+  
+  **Solución**: Implementa migraciones o limpia el estado persistido:
+  ```javascript
+  // Limpiar estado en una versión específica
+  const APP_VERSION = '2.0.0';
+  const storedVersion = localStorage.getItem('app_version');
+  
+  if (storedVersion !== APP_VERSION) {
+    localStorage.removeItem('persist:root');
+    localStorage.setItem('app_version', APP_VERSION);
+  }
+  ```
+</Accordion>
+
+<Accordion title="Error de desencriptación">
+  **Causa**: La secretKey cambió o es incorrecta.
+  
+  **Solución**: 
+  1. Verifica que la secretKey sea consistente
+  2. Si cambió la clave, limpia el storage:
+  ```javascript
+  localStorage.removeItem('persist:root');
+  location.reload();
+  ```
+</Accordion>
+
+## Consideraciones de Rendimiento
+
+### Tamaño del Estado
+
+El estado persistido se almacena en localStorage, que típicamente tiene un límite de 5-10MB:
+
+- Evita persistir grandes cantidades de datos
+- Usa whitelist para persistir solo lo necesario
+- Considera persistir solo IDs y hacer fetching bajo demanda
+
+### Frecuencia de Escritura
+
+Por defecto, redux-persist escribe al storage en cada cambio de estado:
+
+```javascript
+const persistConfig = {
+  // ...
+  throttle: 1000, // Escribe máximo una vez por segundo
+};
+```
+
+<Warning>
+  Escrituras muy frecuentes pueden afectar el rendimiento. Usa throttling si actualizas el estado muy rápidamente.
+</Warning>
+
+## Mejores Prácticas
+
+<CardGroup cols={2}>
+  <Card title="Whitelist Específica" icon="list-check">
+    Solo persiste los slices que realmente necesitas entre sesiones.
+  </Card>
+  <Card title="Encriptación Robusta" icon="shield-halved">
+    Usa variables de entorno para la secretKey de encriptación.
+  </Card>
+  <Card title="Versionado" icon="code-branch">
+    Implementa control de versiones para manejar cambios en la estructura del estado.
+  </Card>
+  <Card title="Manejo de Errores" icon="triangle-exclamation">
+    Siempre proporciona un callback onError en las transformaciones.
+  </Card>
+</CardGroup>
+
+## Recursos Adicionales
+
+- [Documentación oficial de redux-persist](https://github.com/rt2zz/redux-persist)
+- [redux-persist-transform-encrypt](https://github.com/maxdeviant/redux-persist-transform-encrypt)
+- [Redux Toolkit Persistence](https://redux-toolkit.js.org/usage/usage-guide#use-with-redux-persist)

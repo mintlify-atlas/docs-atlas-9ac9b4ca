@@ -1,0 +1,378 @@
+---
+title: "Entradas de Cortesía"
+description: "Sistema dedicado para gestionar entradas gratuitas y promocionales con flujo independiente"
+---
+
+## Introducción
+
+El módulo de entradas de cortesía permite a los operadores de taquilla emitir tickets gratuitos o promocionales para eventos. Este sistema tiene su propio flujo independiente del checkout regular.
+
+<Note>
+Las entradas de cortesía no requieren procesamiento de pago pero mantienen el registro completo del beneficiario en la base de datos.
+</Note>
+
+## Acceso al Módulo
+
+El módulo de cortesía está protegido por `OfficeGuard` y requiere autenticación:
+
+```javascript src/routes/router.js lines 55-59
+// Entradas de Cortesía
+{ 
+  path: "/cortesia", 
+  exact: true, 
+  element: (<OfficeGuard><CourtesyTickets /></OfficeGuard>) 
+},
+{ 
+  path: "/cortesia-proceso", 
+  exact: true, 
+  element: (<OfficeGuard><CourtesyProcess /></OfficeGuard>) 
+},
+{ 
+  path: "/cortesia-resumen", 
+  exact: true, 
+  element: (<OfficeGuard><CourtesySummary /></OfficeGuard>) 
+}
+```
+
+## Flujo de Cortesía
+
+<Steps>
+  <Step title="Selección de Evento">
+    El operador selecciona el evento para el cual emitir cortesías desde `/cortesia`
+  </Step>
+  
+  <Step title="Proceso de Emisión">
+    En `/cortesia-proceso`, el operador:
+    - Selecciona asientos/zonas
+    - Ingresa datos del beneficiario
+    - Especifica motivo de la cortesía
+  </Step>
+  
+  <Step title="Confirmación">
+    En `/cortesia-resumen`, se muestra el resumen y se genera el ticket
+  </Step>
+</Steps>
+
+## Componente: CourtesyTicketsList
+
+Muestra los eventos disponibles para emitir cortesías:
+
+```javascript src/components/apps/courtesy/CourtesyTicketsList.js
+import { collection, getDocs } from 'firebase/firestore';
+import { getEventData } from '../../../store/apps/event/eventSlice';
+
+const CourtesyTicketsList = () => {
+    const [events, setEvents] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const OfficeAuth = useSelector((state) => state.office.office);
+    const dispatch = useDispatch();
+    const navigate = useNavigate();
+
+    const goToCourtesyProcess = (eventData) => {
+        dispatch(getEventData({ event: eventData }));
+        navigate('/cortesia-proceso');
+    };
+
+    useEffect(() => {
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                // Verificar autenticación de taquilla
+                if (!OfficeAuth?.id) {
+                    toast.error('No hay información de oficina disponible');
+                    return;
+                }
+
+                const querySnapshot = await getDocs(
+                    collection(db, `offices/${OfficeAuth.id}/events`)
+                );
+
+                if (!querySnapshot.empty) {
+                    const events = querySnapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setEvents(events);
+                }
+            } catch (error) {
+                console.error("Error al cargar eventos:", error);
+                toast.error('Error al cargar eventos');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [OfficeAuth]);
+
+    return (
+        <ul className="grid grid-cols-2 gap-4">
+            {events.map((event) => (
+                <li key={event.id}>
+                    <div className="event-card">
+                        <img src={event?.event.media[0]} alt="" />
+                        <button onClick={() => goToCourtesyProcess(event)}>
+                            Gestionar cortesías
+                        </button>
+                    </div>
+                    <p>{event?.event.name}</p>
+                </li>
+            ))}
+        </ul>
+    );
+};
+```
+
+### Manejo de Estados
+
+El componente maneja tres estados importantes:
+
+<Tabs>
+  <Tab title="Sin Autenticación">
+    ```javascript
+    if (!OfficeAuth || !OfficeAuth.id) {
+        return (
+            <div className="error-state">
+                <p>No hay información de oficina disponible</p>
+                <button onClick={() => navigate('/')}>Volver al inicio</button>
+            </div>
+        );
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Cargando">
+    ```javascript
+    if (loading) {
+        return (
+            <div className="loading-state">
+                <p>Cargando eventos...</p>
+            </div>
+        );
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Sin Eventos">
+    ```javascript
+    if (events.length === 0) {
+        return (
+            <div className="empty-state">
+                <p>No hay eventos disponibles</p>
+            </div>
+        );
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Vista Principal: CourtesyTickets
+
+```javascript src/views/courtesy/CourtesyTickets.js
+const CourtesyTickets = () => {
+  return (
+    <>
+      <div className="header">
+        <span className="title">Entradas de Cortesía</span>
+        <span className="subtitle">Gestione las entradas de cortesía</span>
+      </div>
+      <CourtesyTicketsList />
+    </>
+  );
+};
+```
+
+## Diferencias con Checkout Regular
+
+<CardGroup cols={2}>
+  <Card title="Sin Pago" icon="ban">
+    No se requieren métodos de pago ni cálculo de impuestos
+  </Card>
+  <Card title="Motivo Requerido" icon="comment">
+    Se debe especificar el motivo de la emisión (prensa, sponsor, staff, etc.)
+  </Card>
+  <Card title="Registro Especial" icon="tag">
+    Los tickets se marcan como "cortesía" en la base de datos
+  </Card>
+  <Card title="Aprobación" icon="check-circle">
+    Puede requerir aprobación del supervisor según configuración
+  </Card>
+</CardGroup>
+
+## Estructura de Datos
+
+### Orden de Cortesía
+
+```json
+{
+  "order_id": "CRT-2024-001",
+  "type": "courtesy",
+  "event_id": "event_123",
+  "office_id": "office_456",
+  "tickets": [
+    {
+      "ticket_id": "ticket_789",
+      "zone": "VIP",
+      "seat_id": "A-15",
+      "original_price": 150.00,
+      "courtesy_price": 0.00,
+      "beneficiary": {
+        "name": "Juan Pérez",
+        "email": "juan@example.com",
+        "phone": "+58 412 123 4567",
+        "id_type": "V",
+        "id_number": "12345678"
+      },
+      "reason": "Prensa",
+      "notes": "Periodista del Diario Nacional"
+    }
+  ],
+  "issued_by": {
+    "user_id": "user_123",
+    "user_name": "María González",
+    "office_name": "Taquilla Principal"
+  },
+  "issued_at": "2024-01-15T10:30:00Z",
+  "approved_by": "supervisor_456",
+  "status": "active"
+}
+```
+
+## Categorías de Cortesía
+
+Las cortesías típicamente se categorizan por motivo:
+
+<AccordionGroup>
+  <Accordion title="Prensa">
+    Para periodistas y medios de comunicación que cubren el evento
+  </Accordion>
+  
+  <Accordion title="Sponsor/Patrocinador">
+    Para representantes de empresas patrocinadoras
+  </Accordion>
+  
+  <Accordion title="Staff/Personal">
+    Para empleados y personal del evento o productora
+  </Accordion>
+  
+  <Accordion title="Artista/Invitado">
+    Para artistas invitados y su equipo
+  </Accordion>
+  
+  <Accordion title="Promocional">
+    Para sorteos, concursos y promociones
+  </Accordion>
+  
+  <Accordion title="Compensación">
+    Para compensar inconvenientes o errores
+  </Accordion>
+</AccordionGroup>
+
+## Validaciones Especiales
+
+<Warning>
+Las entradas de cortesía están sujetas a límites configurables por evento para evitar abusos.
+</Warning>
+
+```javascript
+// Ejemplo de validación
+const validateCourtesyLimit = async (eventId) => {
+  const eventDoc = await getDoc(doc(db, 'events', eventId));
+  const courtesyConfig = eventDoc.data().courtesy_config;
+  
+  if (!courtesyConfig.enabled) {
+    throw new Error('Las cortesías no están habilitadas para este evento');
+  }
+  
+  const courtesyCount = await getCourtesyCount(eventId);
+  
+  if (courtesyCount >= courtesyConfig.max_tickets) {
+    throw new Error(`Se alcanzó el límite de ${courtesyConfig.max_tickets} cortesías`);
+  }
+  
+  return true;
+};
+```
+
+## Permisos y Control de Acceso
+
+```javascript
+// Verificar permisos para emitir cortesías
+const canIssueCourtesy = (user, officeAuth) => {
+  // Solo supervisores y administradores pueden emitir cortesías
+  return user.role === 'supervisor' || user.role === 'admin';
+};
+
+// Verificar límite diario por operador
+const checkDailyLimit = async (userId) => {
+  const today = new Date().toISOString().split('T')[0];
+  const courtesiesToday = await getCourtesyCountByUser(userId, today);
+  
+  return courtesiesToday < MAX_COURTESY_PER_DAY;
+};
+```
+
+## Reportes y Auditoría
+
+<Info>
+Todas las emisiones de cortesías quedan registradas para auditoría y análisis.
+</Info>
+
+### Métricas Importantes
+
+- Total de cortesías emitidas por evento
+- Cortesías por categoría/motivo
+- Cortesías por operador
+- Porcentaje de cortesías vs. ventas totales
+- Valor total en cortesías (precio original)
+
+## Notificaciones
+
+Los beneficiarios reciben una confirmación por email:
+
+```javascript
+// Enviar email de cortesía
+await send_email({
+  to_email: beneficiary.email,
+  to_name: beneficiary.name,
+  subject: `Tu entrada de cortesía - ${eventName}`,
+  html_send: courtesyEmailTemplate({
+    beneficiary,
+    event,
+    ticket,
+    qr_code: ticket.qr_code
+  })
+});
+```
+
+<Note>
+La plantilla de email para cortesías es similar a la de ventas regulares, pero incluye la mención "Entrada de Cortesía" prominentemente.
+</Note>
+
+## Mejores Prácticas
+
+<CardGroup cols={2}>
+  <Card title="Documentación" icon="file-lines">
+    Siempre documenta el motivo de la cortesía
+  </Card>
+  <Card title="Límites Claros" icon="gauge">
+    Establece límites por evento y por operador
+  </Card>
+  <Card title="Aprobación" icon="user-check">
+    Requiere aprobación de supervisor para cortesías VIP
+  </Card>
+  <Card title="Auditoría" icon="magnifying-glass">
+    Revisa regularmente el uso de cortesías
+  </Card>
+</CardGroup>
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Proceso de Checkout" icon="cart-shopping" href="/features/checkout">
+    Compara con el flujo de venta regular
+  </Card>
+  <Card title="Permisos" icon="shield" href="/auth/permissions">
+    Aprende sobre el control de acceso
+  </Card>
+</CardGroup>

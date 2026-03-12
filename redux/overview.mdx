@@ -1,0 +1,176 @@
+---
+title: 'Introducción a Redux'
+description: 'Gestión del estado global de la aplicación con Redux Toolkit'
+---
+
+## Descripción General
+
+TMT utiliza **Redux Toolkit** para la gestión del estado global de la aplicación. Redux Toolkit es la forma recomendada de escribir lógica de Redux, proporcionando herramientas que simplifican la configuración y reducen el código boilerplate.
+
+## Arquitectura del Store
+
+El store de Redux está organizado en múltiples slices, cada uno responsable de un dominio específico de la aplicación:
+
+<CardGroup cols={2}>
+  <Card title="auth" icon="user-shield">
+    Gestión de autenticación de usuarios
+  </Card>
+  <Card title="office" icon="building">
+    Gestión de autenticación de taquillas
+  </Card>
+  <Card title="event" icon="calendar">
+    Datos del evento actual
+  </Card>
+  <Card title="setup" icon="gear">
+    Configuración global de la aplicación
+  </Card>
+  <Card title="loading" icon="spinner">
+    Estado de carga de la aplicación
+  </Card>
+  <Card title="emails" icon="envelope">
+    Control de correos enviados
+  </Card>
+</CardGroup>
+
+## Configuración del Store
+
+El store se configura en `src/store/Store.js` utilizando `configureStore` de Redux Toolkit:
+
+```javascript src/store/Store.js
+import { combineReducers } from "redux";
+import { configureStore } from "@reduxjs/toolkit";
+import { persistReducer, persistStore } from "redux-persist";
+
+import SetupReducer from './setup/SetupSlice';
+import authReducer from "./apps/auth/authSlice";
+import eventReducer from "./apps/event/eventSlice";
+import authOfficeReducer from "./apps/office/officeSlice";
+import loadingReducer from "./apps/loading/loadingSlice";
+import emailsReducer from "./apps/emails/emailsSlice";
+
+const appReducer = combineReducers({
+  auth: authReducer,
+  office: authOfficeReducer,
+  event: eventReducer,
+  setup: SetupReducer,
+  loading: loadingReducer,
+  emails: emailsReducer,
+});
+
+export const store = configureStore({
+  reducer: persistedReducer,
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+      },
+    }),
+});
+```
+
+<Note>
+  El store utiliza `redux-persist` para mantener el estado entre sesiones del navegador, con encriptación para proteger datos sensibles.
+</Note>
+
+## Uso en Componentes
+
+### Leer Estado
+
+Para acceder al estado de Redux en tus componentes, utiliza el hook `useSelector`:
+
+```javascript
+import { useSelector } from 'react-redux';
+
+function MyComponent() {
+  const user = useSelector((state) => state.auth.user);
+  const isAuthenticated = useSelector((state) => state.auth.isAuthenticated);
+  const event = useSelector((state) => state.event.event);
+  
+  return (
+    <div>
+      {isAuthenticated && <p>Bienvenido, {user.name}</p>}
+    </div>
+  );
+}
+```
+
+### Despachar Acciones
+
+Para actualizar el estado, utiliza el hook `useDispatch` para despachar acciones:
+
+```javascript
+import { useDispatch } from 'react-redux';
+import { authStateChanged } from '../store/apps/auth/authSlice';
+
+function LoginComponent() {
+  const dispatch = useDispatch();
+  
+  const handleLogin = (user) => {
+    dispatch(authStateChanged({
+      isAuthenticated: true,
+      user: user
+    }));
+  };
+  
+  return <button onClick={() => handleLogin(userData)}>Iniciar Sesión</button>;
+}
+```
+
+## Acción de Logout Global
+
+El store incluye una acción especial `LOGOUT` que limpia completamente el estado y el almacenamiento persistente:
+
+```javascript src/store/Store.js
+const LOGOUT = 'LOGOUT';
+
+const rootReducer = (state, action) => {
+  if (action.type === LOGOUT) {
+    storage.removeItem('persist:root');
+    state = undefined;
+  }
+  return appReducer(state, action);
+};
+
+export const logout = () => ({ type: LOGOUT });
+```
+
+### Uso del Logout
+
+```javascript
+import { useDispatch } from 'react-redux';
+import { logout } from '../store/Store';
+
+function LogoutButton() {
+  const dispatch = useDispatch();
+  
+  const handleLogout = () => {
+    dispatch(logout());
+    // El estado se limpia completamente
+  };
+  
+  return <button onClick={handleLogout}>Cerrar Sesión</button>;
+}
+```
+
+<Warning>
+  La acción `logout()` elimina **todo** el estado persistido. Úsala solo cuando necesites cerrar sesión completamente.
+</Warning>
+
+## Middleware y Configuración
+
+El store está configurado con middleware personalizado para:
+
+- **Serialización**: Ignora acciones específicas de `redux-persist` en las verificaciones de serialización
+- **DevTools**: Integración automática con Redux DevTools en desarrollo
+- **Persistencia**: Middleware para sincronizar el estado con el almacenamiento local
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Slices de Redux" icon="puzzle-piece" href="/redux/slices">
+    Explora los slices individuales y sus acciones
+  </Card>
+  <Card title="Persistencia" icon="floppy-disk" href="/redux/persistence">
+    Aprende sobre la persistencia y encriptación del estado
+  </Card>
+</CardGroup>

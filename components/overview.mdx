@@ -1,0 +1,77 @@
+---
+title: "Componentes UI"
+description: "Biblioteca de componentes reutilizables construidos con React y Tailwind CSS"
+---
+
+## Introducción
+
+TMT utiliza una biblioteca de componentes UI construidos sobre [Radix UI](https://www.radix-ui.com/) y estilizados con [Tailwind CSS](https://tailwindcss.com/). Los componentes están diseñados para ser accesibles, personalizables y fáciles de usar.
+
+## Componentes Disponibles
+
+<CardGroup cols={2}>
+  <Card title="Button" icon="square" href="/components/buttons">
+    Botones con múltiples variantes y tamaños
+  </Card>
+  <Card title="Input" icon="keyboard" href="/components/forms">
+    Campos de entrada de texto con validación
+  </Card>
+  <Card title="Card" icon="table-cells" href="/components/cards">
+    Tarjetas para agrupar contenido relacionado
+  </Card>
+  <Card title="EventsList" icon="calendar" href="/components/events-list">
+    Lista de eventos con grid responsive
+  </Card>
+  <Card title="CheckoutForm" icon="cart-shopping" href="/components/checkout-form">
+    Formulario completo de checkout
+  </Card>
+  <Card title="PaymentMethods" icon="credit-card" href="/components/payment-methods">
+    Selector de métodos de pago
+  </Card>
+</CardGroup>
+
+## Arquitectura
+
+Todos los componentes UI siguen un patrón consistente:
+
+```
+src/components/
+├── ui/           # Componentes base reutilizables
+│   ├── Button.js
+│   ├── Input.js
+│   ├── Card.js
+│   └── ...
+└── apps/        # Componentes específicos de la aplicación
+    ├── events/
+    ├── auth/
+    └── ...
+```
+
+## Utilidad cn()
+
+Los componentes usan la utilidad `cn()` para combinar clases de Tailwind:
+
+```javascript src/utils/cn.js
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs) {
+  return twMerge(clsx(inputs));
+}
+```
+
+Esto permite combinar clases condicionales sin conflictos.
+
+## Próximos Pasos
+
+<CardGroup cols={3}>
+  <Card title="Botones" icon="square" href="/components/buttons">
+    Componente Button
+  </Card>
+  <Card title="Formularios" icon="keyboard" href="/components/forms">
+    Inputs y validación
+  </Card>
+  <Card title="Cards" icon="table-cells" href="/components/cards">
+    Tarjetas de contenido
+  </Card>
+</CardGroup>

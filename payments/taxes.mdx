@@ -1,0 +1,439 @@
+---
+title: 'Cálculo de Impuestos'
+description: 'Sistema de cálculo automático de IVA e IGTF'
+icon: 'percent'
+---
+
+## Introducción
+
+El sistema TMT calcula automáticamente dos tipos de impuestos en cada transacción:
+
+<CardGroup cols={2}>
+  <Card title="IVA (16%)" icon="calculator">
+    Impuesto al Valor Agregado aplicado sobre el subtotal
+  </Card>
+  <Card title="IGTF (3%)" icon="dollar-sign">
+    Impuesto a las Grandes Transacciones Financieras (solo en pagos en divisas)
+  </Card>
+</CardGroup>
+
+## Funciones de Cálculo
+
+### Funciones Auxiliares
+
+El sistema utiliza dos funciones matemáticas para garantizar precisión:
+
+```javascript CheckOut.js (líneas 26-34)
+const truncateDecimals = (number, digits) => {
+  const multiplier = Math.pow(10, digits);
+  return Math.trunc(number * multiplier) / multiplier;
+};
+
+const roundDecimals = (number, digits) => {
+  const multiplier = Math.pow(10, digits);
+  return Math.round(number * multiplier) / multiplier;
+};
+```
+
+<Accordion title="¿Por qué dos funciones diferentes?">
+  - **truncateDecimals**: Se usa para el subtotal y el IGTF, eliminando decimales sin redondear. Esto evita cobrar de más al cliente.
+  - **roundDecimals**: Se usa para el IVA y el total final, redondeando al decimal más cercano para cumplir con normativas fiscales.
+</Accordion>
+
+## Cálculo del Subtotal
+
+El subtotal es la suma de los precios de todos los asientos seleccionados, antes de impuestos.
+
+```javascript CheckOut.js (líneas 712-718)
+const calculateSubtotal = () => {
+  const subtotal = selectedSeats.reduce((sum, seat) => {
+    const price = clientType === 'corporativo' ? (seat.corporate_price || seat.price) : seat.price;
+    return sum + (price || 0);
+  }, 0);
+  return truncateDecimals(subtotal, 2);
+};
+```
+
+<Note>
+  Si el cliente es corporativo, se utiliza el `corporate_price` si está disponible. De lo contrario, se usa el precio regular.
+</Note>
+
+### Ejemplo de Cálculo
+
+```javascript
+// Asientos seleccionados:
+// - Asiento 1: $50.00
+// - Asiento 2: $75.50
+// - Asiento 3: $30.25
+
+const selectedSeats = [
+  { price: 50.00 },
+  { price: 75.50 },
+  { price: 30.25 }
+];
+
+const subtotal = calculateSubtotal();
+// Resultado: $155.75
+```
+
+## Cálculo del IVA (16%)
+
+El IVA se calcula como el 16% del subtotal.
+
+```javascript CheckOut.js (líneas 720-722)
+const calculateTaxes = (subtotal) => {
+  return roundDecimals(subtotal * 0.16, 2);
+};
+```
+
+### Fórmula
+
+$$
+IVA = Subtotal \times 0.16
+$$
+
+### Ejemplo de Cálculo
+
+```javascript
+const subtotal = 155.75;
+const iva = calculateTaxes(subtotal);
+// Cálculo: 155.75 * 0.16 = 24.92
+// Resultado: $24.92
+```
+
+<Info>
+  El IVA del 16% es un requisito fiscal venezolano y se aplica a todas las transacciones sin excepción.
+</Info>
+
+## Cálculo del IGTF (3%)
+
+El IGTF (Impuesto a las Grandes Transacciones Financieras) solo se aplica cuando se utilizan métodos de pago en divisas extranjeras (USD).
+
+### Condición de Aplicación
+
+```javascript CheckOut.js (líneas 724-729)
+const shouldApplyIGTF = () => {
+  return selectedPaymentMethods.some(methodId => {
+    const methodData = paymentMethodsData.find(p => p.payment_method_id === methodId);
+    return methodData && methodData.currency === 'USD';
+  });
+};
+```
+
+<Warning>
+  El IGTF se aplica si **al menos uno** de los métodos de pago seleccionados está en dólares (USD). No importa el porcentaje del pago, si hay cualquier transacción en USD, se aplica el IGTF sobre el total.
+</Warning>
+
+### Cálculo del IGTF
+
+```javascript CheckOut.js (líneas 731-740)
+const calculateIGTF = () => {
+  if (!shouldApplyIGTF()) return 0;
+
+  const subtotal = calculateSubtotal();
+  const taxes = calculateTaxes(subtotal);
+  const baseAmount = subtotal + taxes;
+  const igtf = baseAmount * 0.03;
+
+  return truncateDecimals(igtf, 2);
+};
+```
+
+### Fórmula
+
+$$
+Base\ IGTF = Subtotal + IVA
+$$
+
+$$
+IGTF = Base\ IGTF \times 0.03
+$$
+
+### Ejemplo Completo
+
+```javascript
+// Datos iniciales
+const subtotal = 155.75;
+const iva = 24.92;
+
+// Verificar si aplica IGTF
+const selectedPaymentMethods = ['zelle_usd', 'efectivo_bs'];
+// Como hay un método en USD (zelle_usd), aplica IGTF
+
+// Calcular base IGTF
+const baseIGTF = subtotal + iva;
+// baseIGTF = 155.75 + 24.92 = 180.67
+
+// Calcular IGTF
+const igtf = baseIGTF * 0.03;
+// igtf = 180.67 * 0.03 = 5.4201
+// Con truncateDecimals: 5.42
+```
+
+<Note>
+  Se usa `truncateDecimals` para el IGTF para no cobrar decimales adicionales al cliente.
+</Note>
+
+## Cálculo del Total Final
+
+El total final es la suma de todos los componentes.
+
+```javascript CheckOut.js (líneas 742-748)
+const calculateTotal = () => {
+  const subtotal = calculateSubtotal();
+  const taxes = calculateTaxes(subtotal);
+  const igtf = calculateIGTF();
+
+  return roundDecimals(subtotal + taxes + igtf, 2);
+};
+```
+
+### Fórmula
+
+$$
+Total = Subtotal + IVA + IGTF
+$$
+
+### Flujo Completo con useMemo
+
+El sistema utiliza `useMemo` para optimizar los cálculos:
+
+```javascript CheckOut.js (líneas 750-778)
+const { subtotalForDisplay, ivaForDisplay, igtfForDisplay, finalTotalAmount } = useMemo(() => {
+  if (selectedSeats.length === 0) {
+    return { subtotalForDisplay: 0, ivaForDisplay: 0, igtfForDisplay: 0, finalTotalAmount: 0 };
+  }
+
+  const tempSubtotal = calculateSubtotal();
+  console.log("🚀 ~ CheckOut ~ tempSubtotal:", tempSubtotal)
+
+  const tempIva = calculateTaxes(tempSubtotal);
+  console.log("🚀 ~ CheckOut ~ tempIva:", tempIva)
+
+  const tempIgtf = calculateIGTF();
+  console.log("🚀 ~ CheckOut ~ tempIgtf:", tempIgtf)
+
+  // Usar directamente los valores calculados sin hacer cálculo inverso
+  const sub = tempSubtotal;
+  const iva = tempIva;
+  const igtf = tempIgtf;
+
+  const total = roundDecimals(sub + iva + igtf, 2);
+  console.log("🚀 ~ CheckOut ~ total:", total)
+
+  return {
+    subtotalForDisplay: sub,
+    ivaForDisplay: iva,
+    igtfForDisplay: igtf,
+    finalTotalAmount: total
+  };
+}, [selectedSeats, clientType, selectedPaymentMethods]);
+```
+
+<Info>
+  El `useMemo` recalcula automáticamente cuando cambian los asientos seleccionados, el tipo de cliente o los métodos de pago.
+</Info>
+
+## Ejemplos de Escenarios
+
+### Escenario 1: Pago en Bolívares (Sin IGTF)
+
+```javascript
+// Datos:
+// - 2 asientos: $50.00 cada uno
+// - Método de pago: Pago Móvil (VES)
+
+Subtotal: $100.00
+IVA (16%): $16.00
+IGTF (3%): $0.00  // No aplica porque el pago es en bolívares
+Total: $116.00
+
+// En bolívares (tasa: 36.50 Bs/USD):
+Total en VES: 116.00 * 36.50 = 4,234.00 Bs
+```
+
+### Escenario 2: Pago en Dólares (Con IGTF)
+
+```javascript
+// Datos:
+// - 2 asientos: $50.00 cada uno
+// - Método de pago: Zelle (USD)
+
+Subtotal: $100.00
+IVA (16%): $16.00
+Base IGTF: $116.00
+IGTF (3%): $3.48
+Total: $119.48
+```
+
+### Escenario 3: Pago Mixto (Con IGTF)
+
+```javascript
+// Datos:
+// - 2 asientos: $50.00 cada uno
+// - Método 1: Zelle (USD) - $60.00
+// - Método 2: Pago Móvil (VES) - $59.48 (en bolívares equivalentes)
+
+Subtotal: $100.00
+IVA (16%): $16.00
+Base IGTF: $116.00
+IGTF (3%): $3.48  // Se aplica porque hay un método en USD
+Total: $119.48
+
+// Distribución:
+// - Zelle: $60.00 USD
+// - Pago Móvil: 59.48 * 36.50 = 2,171.02 Bs
+```
+
+<Warning>
+  Aunque solo parte del pago sea en USD, el IGTF se calcula sobre el total completo (subtotal + IVA).
+</Warning>
+
+### Escenario 4: Cliente Corporativo
+
+```javascript
+// Datos:
+// - 3 asientos VIP con precio corporativo
+// - Precio regular: $80.00
+// - Precio corporativo: $70.00
+// - Método de pago: Transferencia (VES)
+
+Subtotal: 3 * $70.00 = $210.00  // Usa precio corporativo
+IVA (16%): $33.60
+IGTF (3%): $0.00  // No aplica (pago en VES)
+Total: $243.60
+
+// Ahorro corporativo:
+// Precio regular: 3 * $80.00 = $240.00
+// Precio corporativo: $210.00
+// Ahorro: $30.00 (12.5%)
+```
+
+## Conversión de Moneda
+
+El sistema utiliza la tasa de cambio del Banco Central de Venezuela:
+
+```javascript CheckOut.js (línea 65)
+const usdCentralBank = useSelector((state) => state.setup?.Setup?.exchange_rates?.rates?.usd ?? 0);
+```
+
+### Conversión en Transacciones
+
+```javascript CheckOut.js (líneas 267-304)
+const amountInUsd = payments.currency === 'USD' ? rawAmount : rawAmount / usdCentralBank;
+
+return {
+  amount: rawAmount,
+  amount_currency: payments.currency,
+  amount_exchange: amountInUsd,
+  amount_exchange_rate: payments.currency === 'USD' ? 1 : usdCentralBank,
+  date: serverTimestamp(),
+  payment_data: {
+    ...methodData,
+  },
+  payment_id: payments.payment_method_id,
+  payment_name: payments.name,
+  status: true,
+  point_sale_tmt: pointSaleTmt,
+  custody_account: payments.custody_account
+}
+```
+
+### Cálculo de Total en Bolívares
+
+```javascript CheckOut.js (líneas 1159-1161)
+const getTotalAmountBS = () => {
+  return truncateDecimals(calculateTotal() * usdCentralBank, 2);
+};
+```
+
+## Visualización en Email de Confirmación
+
+Los impuestos se muestran claramente en el email de confirmación:
+
+```javascript CheckOut.js (líneas 590-616)
+<div style="padding: 20px;">
+  <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+    <span style="font-size: 15px;">Entradas (${tickets.length})</span>
+    <span style="font-size: 15px; font-weight: 500;"> $${subtotalForDisplay.toFixed(2)}</span>
+  </div>
+  <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+    <span style="font-size: 15px;">IVA (16%)</span>
+    <span style="font-size: 15px; font-weight: 500;"> $${ivaForDisplay.toFixed(2)}</span>
+  </div>
+  ${igtfForDisplay > 0 ? `
+  <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+    <span style="font-size: 15px;">IGTF (3%)</span>
+    <span style="font-size: 15px; font-weight: 500;"> $${igtfForDisplay.toFixed(2)}</span>
+  </div>
+  ` : ''}
+  
+  <div style="border-top: 1px solid #e5e7eb; margin: 15px 0; padding-top: 15px;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+      <span style="font-size: 16px; font-weight: 600;">Total (BS)</span>
+      <span style="font-size: 16px; font-weight: 600;">${(finalTotalAmount * usdCentralBank).toFixed(2)}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between;">
+      <span style="font-size: 16px; font-weight: 600;">Total</span>
+      <span style="font-size: 16px; font-weight: 600; color: #7c3aed;">$${finalTotalAmount.toFixed(2)}</span>
+    </div>
+  </div>
+</div>
+```
+
+## Precisión y Validación
+
+El sistema valida que el monto ingresado coincida con el total calculado:
+
+```javascript CheckOut.js (líneas 786-798)
+const basicDataValid = selectedSeats.length > 0 &&
+  selectedPaymentMethods.length > 0 &&
+  formik.values.customer_name.trim() !== '' &&
+  formik.values.customer_email.trim() !== '' &&
+  formik.values.customer_phone.trim() !== '' &&
+  formik.values.customer_id.trim() !== '' &&
+  formik.values.customer_id_type.trim() !== '' &&
+  (clientType !== 'corporativo' || (
+    formik.values.company_name.trim() !== '' &&
+    formik.values.company_rif.trim() !== '' &&
+    formik.values.company_rif_type.trim() !== '' &&
+    formik.values.company_address.trim() !== ''
+  )) &&
+  Math.abs(enteredAmount - finalTotalAmount) < 0.01;
+```
+
+<Note>
+  Se permite una diferencia máxima de **0.01 USD** para manejar pequeñas diferencias de redondeo.
+</Note>
+
+## Tabla Resumen de Impuestos
+
+| Impuesto | Tasa | Base de Cálculo | Se Aplica Cuando | Función Usada |
+|----------|------|-----------------|------------------|---------------|
+| **IVA** | 16% | Subtotal | Siempre | `roundDecimals` |
+| **IGTF** | 3% | Subtotal + IVA | Hay método de pago en USD | `truncateDecimals` |
+
+## Consideraciones Legales
+
+<Warning>
+  El cálculo de impuestos debe cumplir con las normativas fiscales venezolanas:
+  
+  - **IVA**: Ley del Impuesto al Valor Agregado
+  - **IGTF**: Decreto Constituyente sobre el Impuesto a las Grandes Transacciones Financieras
+  
+  Las tasas pueden cambiar según modificaciones legales.
+</Warning>
+
+## Próximos Pasos
+
+<CardGroup cols={3}>
+  <Card title="Vista General de Pagos" icon="credit-card" href="/payments/overview">
+    Vuelve a la introducción del sistema de pagos
+  </Card>
+  <Card title="Métodos de Pago" icon="wallet" href="/payments/methods">
+    Explora los métodos de pago disponibles
+  </Card>
+  <Card title="Precios Corporativos" icon="building" href="/payments/corporate">
+    Descubre el sistema de precios corporativos
+  </Card>
+</CardGroup>

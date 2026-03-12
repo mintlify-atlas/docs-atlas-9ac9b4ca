@@ -1,0 +1,288 @@
+---
+title: "Gestión de Eventos"
+description: "Sistema completo para administrar eventos con información detallada, zonas de asientos y precios"
+---
+
+## Introducción
+
+El sistema de gestión de eventos de TMT permite a los operadores de taquilla acceder y vender entradas para eventos configurados en la plataforma. Los eventos se organizan por taquilla física y contienen toda la información necesaria para la venta de tickets.
+
+## Estructura de un Evento
+
+Cada evento en TMT contiene la siguiente información:
+
+<CardGroup cols={2}>
+  <Card title="Información Básica" icon="circle-info">
+    - Nombre del evento
+    - Descripción
+    - Imágenes y multimedia
+    - Fecha y hora de inicio
+  </Card>
+  <Card title="Ubicación" icon="location-dot">
+    - Nombre del venue
+    - Dirección completa
+    - Capacidad del local
+  </Card>
+  <Card title="Configuración de Zonas" icon="layer-group">
+    - Zonas de asientos
+    - Precios por zona
+    - Precios corporativos
+    - Disponibilidad
+  </Card>
+  <Card title="Integración" icon="plug">
+    - ID del cliente
+    - Configuración de Seats.io
+    - Métodos de pago habilitados
+  </Card>
+</CardGroup>
+
+## Lista de Eventos
+
+El componente `EventsList` muestra todos los eventos disponibles para una taquilla específica:
+
+```javascript src/components/apps/events/EventsList.js
+import { collection, getDocs } from 'firebase/firestore';
+import { getEventData } from '../../../store/apps/event/eventSlice';
+
+const EventsList = () => {
+    const [events, setEvents] = useState([]);
+    const OfficeAuth = useSelector((state) => state.office.office);
+    const dispatch = useDispatch();
+    const navigate = useNavigate();
+
+    const goToCheckOut = (eventData) => {
+        dispatch(getEventData({ event: eventData }));
+        navigate('/checkout');
+    };
+
+    useEffect(() => {
+        const fetchData = async () => {
+            const querySnapshot = await getDocs(
+                collection(db, `offices/${OfficeAuth.id}/events`)
+            );
+
+            if (!querySnapshot.empty) {
+                const events = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setEvents(events);
+            }
+        };
+        fetchData();
+    }, []);
+
+    return (
+        <ul className="grid grid-cols-2 gap-x-4 gap-y-8">
+            {events.map((event) => (
+                <li key={event.id}>
+                    <div className="group block w-full rounded-lg">
+                        <img src={event?.event.media[0]} alt="" />
+                        <button onClick={() => goToCheckOut(event)}>
+                            Ver detalles
+                        </button>
+                    </div>
+                    <p>{event?.event.name}</p>
+                </li>
+            ))}
+        </ul>
+    );
+};
+```
+
+## Estructura de Datos en Firestore
+
+<Note>
+Los eventos se almacenan en Firestore en la ruta: `offices/{officeId}/events/{eventId}`
+</Note>
+
+### Documento de Evento
+
+```json
+{
+  "id": "event_123",
+  "event": {
+    "name": "Concierto de Rock",
+    "description": "Gran concierto con artistas invitados",
+    "media": [
+      "https://storage.firebase.com/event-image.jpg"
+    ]
+  },
+  "date_start": "Timestamp",
+  "venue_name": "Teatro Principal",
+  "client_id": "client_abc",
+  "client_name": "Productora XYZ",
+  "seatsio_event": {
+    "chartKey": "chart_key_123",
+    "eventKey": "event_key_456",
+    "categories": [
+      {
+        "key": "1",
+        "label": "VIP",
+        "color": "#7c3aed"
+      }
+    ]
+  }
+}
+```
+
+## Configuración de Zonas
+
+Las zonas de asientos se configuran en un documento separado:
+
+```
+events/{eventId}/setup/zones
+```
+
+### Estructura de Zona
+
+```json
+{
+  "zone": [
+    {
+      "name": "VIP",
+      "price": 150.00,
+      "corporate_price": 120.00,
+      "public": true,
+      "status": true,
+      "capacity": 100
+    },
+    {
+      "name": "Platea",
+      "price": 80.00,
+      "corporate_price": 65.00,
+      "public": true,
+      "status": true,
+      "capacity": 300
+    }
+  ]
+}
+```
+
+<Info>
+Las zonas con `public: true` y `status: true` son las únicas visibles en el proceso de compra.
+</Info>
+
+## Flujo de Selección de Evento
+
+<Steps>
+  <Step title="Autenticación en Taquilla">
+    El usuario debe estar autenticado en una taquilla específica para ver los eventos disponibles.
+  </Step>
+  
+  <Step title="Carga de Eventos">
+    El sistema consulta Firestore para obtener todos los eventos asignados a la taquilla actual.
+    
+    ```javascript
+    collection(db, `offices/${OfficeAuth.id}/events`)
+    ```
+  </Step>
+  
+  <Step title="Visualización">
+    Los eventos se muestran en una grilla responsive con imágenes y nombres.
+  </Step>
+  
+  <Step title="Selección">
+    Al hacer clic en un evento:
+    - Se almacena en Redux usando `getEventData`
+    - Se navega a la página de checkout
+    - Se cargan las zonas y asientos disponibles
+  </Step>
+</Steps>
+
+## Redux: Almacenamiento de Evento Seleccionado
+
+El evento seleccionado se almacena en Redux para uso global:
+
+```javascript src/store/apps/event/eventSlice.js
+import { createSlice } from '@reduxjs/toolkit';
+
+const eventSlice = createSlice({
+  name: 'event',
+  initialState: {
+    event: null,
+  },
+  reducers: {
+    getEventData: (state, action) => {
+      state.event = action.payload.event;
+    },
+  },
+});
+
+export const { getEventData } = eventSlice.actions;
+export default eventSlice.reducer;
+```
+
+### Uso en Componentes
+
+```javascript
+import { useSelector } from 'react-redux';
+
+function CheckOut() {
+  const eventData = useSelector((state) => state.event.event);
+  
+  console.log(eventData.event.name); // "Concierto de Rock"
+  console.log(eventData.client_id);  // "client_abc"
+}
+```
+
+## Integración con Seats.io
+
+<Info>
+No todos los eventos requieren Seats.io. El sistema verifica si existe `seatsio_event` en el documento del evento.
+</Info>
+
+### Detección de Mapa de Seats.io
+
+```javascript src/views/checkout/CheckOut.js
+const eventDoc = await getDoc(doc(db, 'events', eventData?.id));
+
+if (eventDoc.exists()) {
+  const eventDataFromDb = eventDoc.data();
+  if (eventDataFromDb.seatsio_event && eventDataFromDb.seatsio_event.chartKey) {
+    console.log('🗺️ Evento con mapa de Seats.io detectado');
+    setHasSeatsioMap(true);
+  }
+}
+```
+
+## Mejores Prácticas
+
+<Accordion title="Optimización de Imágenes">
+  Las imágenes de eventos deben estar optimizadas para web:
+  - Formato WebP o JPEG
+  - Máximo 500KB por imagen
+  - Dimensiones recomendadas: 800x600px
+</Accordion>
+
+<Accordion title="Caché de Eventos">
+  Los eventos se cargan una vez por sesión. Para refrescar la lista:
+  ```javascript
+  // Refrescar eventos manualmente
+  useEffect(() => {
+    fetchData();
+  }, [OfficeAuth.id]);
+  ```
+</Accordion>
+
+<Accordion title="Manejo de Errores">
+  ```javascript
+  try {
+    const querySnapshot = await getDocs(collection(db, `offices/${OfficeAuth.id}/events`));
+  } catch (error) {
+    console.error("Error al cargar eventos:", error);
+    toast.error('No se pudieron cargar los eventos');
+  }
+  ```
+</Accordion>
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Proceso de Checkout" icon="cart-shopping" href="/features/checkout">
+    Aprende sobre el flujo completo de compra
+  </Card>
+  <Card title="Selección de Asientos" icon="chair" href="/features/seat-selection">
+    Sistemas manual y con Seats.io
+  </Card>
+</CardGroup>

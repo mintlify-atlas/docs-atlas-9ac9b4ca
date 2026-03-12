@@ -1,0 +1,387 @@
+---
+title: "Selección de Asientos"
+description: "Sistema dual de selección de asientos: manual con grillas y Seats.io con mapas interactivos"
+---
+
+## Introducción
+
+TMT soporta dos sistemas de selección de asientos que se adaptan a diferentes necesidades:
+
+<CardGroup cols={2}>
+  <Card title="Sistema Manual" icon="grid">
+    Grilla de asientos generada automáticamente desde Firestore
+  </Card>
+  <Card title="Seats.io" icon="map">
+    Mapas interactivos con asientos específicos y admisión general
+  </Card>
+</CardGroup>
+
+El sistema detecta automáticamente qué método usar basándose en la configuración del evento.
+
+## Detección Automática
+
+Al cargar el checkout, el sistema verifica si el evento tiene configuración de Seats.io:
+
+```javascript src/views/checkout/CheckOut.js lines 89-99
+const eventDoc = await getDoc(doc(db, 'events', eventData?.id));
+
+if (eventDoc.exists()) {
+  const eventDataFromDb = eventDoc.data();
+  if (eventDataFromDb.seatsio_event && eventDataFromDb.seatsio_event.chartKey) {
+    console.log('🗺️ Evento con mapa de Seats.io detectado');
+    setSeatsioEventData(eventDataFromDb.seatsio_event);
+    setHasSeatsioMap(true);
+    eventHasSeatsioMap = true;
+  }
+}
+```
+
+<Info>
+Si `seatsio_event.chartKey` existe, se usa Seats.io. De lo contrario, se usa el sistema manual.
+</Info>
+
+## Sistema Manual
+
+### Estructura de Datos
+
+Los asientos se cargan desde la colección de tickets:
+
+```javascript
+const querySnapshot = await getDoc(doc(db, `/events/${eventData?.id}/setup`, 'zones'));
+const getTickets = await tickets_list_event_sales({ event_id: eventData?.id });
+const filterZones = querySnapshot.data().zone.filter((x) => x.public === true && x.status === true);
+
+const seatData = {};
+filterZones.forEach((zone) => {
+  const filterTicketsZone = getTickets?.data.response.filter((x) => x.zone === zone.name);
+  let seats = generateSeats(zone, filterTicketsZone);
+  seatData[zone.name] = seats.filter((seat) => seat.status_offline !== true);
+});
+```
+
+### Generación de Asientos
+
+La función `generateSeats` transforma los tickets en objetos de asiento:
+
+```javascript src/views/checkout/CheckOut.js lines 182-203
+const generateSeats = (zone, tickets) => {
+  const sortedTickets = tickets.sort((a, b) => {
+    const numA = parseInt(a.seat_id.match(/\d+/)[0], 10);
+    const numB = parseInt(b.seat_id.match(/\d+/)[0], 10);
+    return numA - numB;
+  });
+
+  const seatsPerZone = sortedTickets.map((ticket) => {
+    return {
+      id: ticket.seat_id,
+      ticket_id: ticket.ticket_id,
+      price: zone.price,
+      corporate_price: zone.corporate_price,
+      status: ticket.status === true ? 'available' : 'unavailable',
+      status_offline: ticket.status_offline,
+      location: zone.name,
+      name: zone.name,
+      metadata: ''
+    }
+  });
+  
+  return seatsPerZone;
+};
+```
+
+### Toggle de Selección
+
+```javascript src/views/checkout/CheckOut.js lines 884-891
+const toggleSeatSelection = (seat) => {
+  if (seat.status === 'unavailable') return;
+  
+  setSelectedSeats(prev =>
+    prev.some(s => s.id === seat.id)
+      ? prev.filter(s => s.id !== seat.id)
+      : [...prev, seat]
+  );
+};
+```
+
+<Note>
+Los asientos con `status: 'unavailable'` o `status_offline: true` no pueden ser seleccionados.
+</Note>
+
+## Seats.io Integration
+
+### Configuración del Componente
+
+```javascript src/views/checkout/CheckOut.js
+import { SeatsioSeatingChart } from '@seatsio/seatsio-react';
+
+<SeatsioSeatingChart
+  publicKey={import.meta.env.VITE_SEATSIO_PUBLIC_KEY}
+  event={seatsioEventData.eventKey}
+  region={import.meta.env.VITE_SEATSIO_REGION}
+  pricing={seatsioPricing}
+  onObjectSelected={handleSeatsioSeatSelected}
+  onObjectDeselected={handleSeatsioSeatDeselected}
+  session="continue"
+  language="es"
+/>
+```
+
+### Pricing Dinámico
+
+Los precios se configuran por categoría:
+
+```javascript src/views/checkout/CheckOut.js lines 110-125
+const zonesDoc = await getDoc(doc(db, `/events/${eventData?.id}/setup`, 'zones'));
+const zonesData = zonesDoc.data();
+const zones = zonesData.zone || [];
+const categories = eventDataFromDb.seatsio_event.categories || [];
+
+// Construir objeto pricing
+const prices = [];
+categories.forEach(category => {
+  const matchingZone = zones.find(zone => zone.name === category.label);
+  if (matchingZone && matchingZone.price) {
+    prices.push({
+      category: String(category.key),
+      price: matchingZone.price
+    });
+  }
+});
+
+const pricingObject = {
+  prices,
+  priceFormatter: (price) => `$${price.toFixed(2)}`
+};
+```
+
+### Handler de Selección
+
+Maneja asientos individuales y admisión general:
+
+```javascript src/views/checkout/CheckOut.js lines 898-941
+const handleSeatsioSeatSelected = (object) => {
+  const category = seatsioEventData.categories.find(
+    c => String(c.key) === String(object.category?.key || object.category)
+  );
+  
+  if (!category) return;
+
+  const categoryLabel = category.label;
+  const objectType = (object.objectType || '').toLowerCase();
+  const isGeneralAdmission = objectType === 'generaladmissionarea';
+  const quantity = isGeneralAdmission && object.numSelected ? object.numSelected : 1;
+
+  // Verificar disponibilidad de tickets
+  if (!seatsioTicketsMap[categoryLabel]?.tickets.length) {
+    toast.error(`No hay tickets disponibles para ${categoryLabel}`);
+    return;
+  }
+
+  // Asignar ticket disponible
+  const ticketForSeat = seatsioTicketsMap[categoryLabel].tickets.find(
+    ticket => !seatsioTicketsMap[categoryLabel].usedTickets.includes(ticket.ticket_id)
+  );
+
+  if (!ticketForSeat) {
+    toast.error(`No hay más tickets disponibles en ${categoryLabel}`);
+    return;
+  }
+
+  const newSeat = {
+    id: object.label || object.id,
+    seatsio_uuid: object.uuid || object.id,
+    seatsio_object: { ...object, quantity: 1 },
+    seatsio_category: String(category.key),
+    ticket_id: ticketForSeat.ticket_id,
+    price: seatsioTicketsMap[categoryLabel].price,
+    corporate_price: ticketForSeat.corporate_price,
+    status: 'available',
+    location: categoryLabel,
+    metadata: 'Seats.io',
+    zone: ticketForSeat.zone || categoryLabel,
+  };
+
+  setSelectedSeats(prev => [...prev, newSeat]);
+};
+```
+
+<Warning>
+Cada asiento seleccionado en Seats.io debe tener un ticket correspondiente disponible en Firestore. Si no hay tickets, la selección se rechaza.
+</Warning>
+
+### Admisión General
+
+Para áreas de admisión general, el sistema maneja múltiples personas:
+
+```javascript
+if (isGeneralAdmission) {
+  const newSeats = [];
+  const usedTicketIds = [];
+
+  for (let i = 0; i < quantity; i++) {
+    const personIndex = i + 1;
+    const ticketForThisPerson = seatsioTicketsMap[categoryLabel].tickets.find(
+      ticket => !seatsioTicketsMap[categoryLabel].usedTickets.includes(ticket.ticket_id) &&
+               !usedTicketIds.includes(ticket.ticket_id)
+    );
+
+    if (!ticketForThisPerson) break;
+
+    newSeats.push({
+      id: `${categoryLabel}-${ticketForThisPerson.ticket_id.slice(-8)}-${personIndex}`,
+      ticket_id: ticketForThisPerson.ticket_id,
+      name: `${categoryLabel} - Persona ${personIndex}`,
+      metadata: 'Seats.io',
+    });
+    
+    usedTicketIds.push(ticketForThisPerson.ticket_id);
+  }
+
+  return [...prevSelectedSeats, ...newSeats];
+}
+```
+
+### Hold Tokens
+
+Seats.io usa hold tokens para reservar asientos temporalmente:
+
+```javascript
+// Al cargar el mapa
+<SeatsioSeatingChart
+  session="continue"
+  onHoldTokenExpired={() => {
+    toast.warning('Su sesión ha expirado');
+    resetAndGoToStep1();
+  }}
+/>
+
+// Al confirmar la compra
+if (hasSeatsioMap && seatsioHoldToken) {
+  const seatsToBook = prepareSeatsForSeatsio(selectedSeats);
+  await book_seats_seatsio({
+    event_id: seatsioEventData.eventKey,
+    seats: seatsToBook,
+    hold_token: seatsioHoldToken
+  });
+}
+```
+
+<Info>
+Los hold tokens de Seats.io expiran después de 15 minutos por defecto. El sistema maneja la expiración automáticamente.
+</Info>
+
+## Precios Corporativos
+
+Ambos sistemas soportan precios corporativos:
+
+```javascript
+const price = clientType === 'corporativo' 
+  ? (seat.corporate_price || seat.price) 
+  : seat.price;
+```
+
+<Tabs>
+  <Tab title="Sistema Manual">
+    Los precios corporativos vienen de la configuración de zona:
+    ```javascript
+    {
+      name: "VIP",
+      price: 150.00,
+      corporate_price: 120.00
+    }
+    ```
+  </Tab>
+  <Tab title="Seats.io">
+    Los precios corporativos se almacenan en el ticket:
+    ```javascript
+    {
+      ticket_id: "ticket_123",
+      zone: "VIP",
+      corporate_price: 120.00
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Visualización de Asientos Seleccionados
+
+Los asientos seleccionados se muestran en tiempo real:
+
+```javascript
+<div className="selected-seats">
+  {selectedSeats.map((seat) => (
+    <div key={seat.id} className="seat-badge">
+      <span>{seat.id}</span>
+      <span>${seat.price.toFixed(2)}</span>
+      <button onClick={() => removeSeat(seat.id)}>×</button>
+    </div>
+  ))}
+</div>
+
+<div className="total">
+  <span>Subtotal:</span>
+  <span>${calculateSubtotal().toFixed(2)}</span>
+</div>
+```
+
+## Comparación de Sistemas
+
+| Característica | Sistema Manual | Seats.io |
+|----------------|----------------|----------|
+| **Setup** | Automático desde Firestore | Requiere configuración en Seats.io |
+| **Visualización** | Grilla simple | Mapa interactivo del venue |
+| **Asientos Específicos** | ✅ Sí | ✅ Sí |
+| **Admisión General** | ❌ No | ✅ Sí |
+| **Costo** | Gratis | Requiere plan Seats.io |
+| **Experiencia Usuario** | Básica | Premium |
+
+## Mejores Prácticas
+
+<AccordionGroup>
+  <Accordion title="Validación de Disponibilidad">
+    Siempre verifica que los tickets estén disponibles antes de permitir la selección:
+    ```javascript
+    if (seat.status === 'unavailable' || seat.status_offline) {
+      toast.error('Este asiento no está disponible');
+      return;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Sincronización de Estado">
+    Mantén sincronizados los estados de Seats.io y tu base de datos:
+    ```javascript
+    // Marcar tickets como usados
+    setSeatsioTicketsMap(prev => ({
+      ...prev,
+      [categoryLabel]: {
+        ...prev[categoryLabel],
+        usedTickets: [...prev[categoryLabel].usedTickets, ticketId]
+      }
+    }));
+    ```
+  </Accordion>
+
+  <Accordion title="Manejo de Errores">
+    Proporciona feedback claro cuando algo falla:
+    ```javascript
+    try {
+      await book_seats_seatsio({ ... });
+      toast.success('Asientos confirmados');
+    } catch (error) {
+      toast.warning('Los asientos están reservados temporalmente');
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Integración Seats.io" icon="map" href="/integrations/seatsio">
+    Guía completa de configuración de Seats.io
+  </Card>
+  <Card title="Proceso de Checkout" icon="cart-shopping" href="/features/checkout">
+    Flujo completo de compra con asientos
+  </Card>
+</CardGroup>

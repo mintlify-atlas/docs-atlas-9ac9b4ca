@@ -1,0 +1,333 @@
+---
+title: 'Guards de Protección'
+description: 'Componentes de protección de rutas en TMT - Taquilla Física'
+icon: 'shield-check'
+---
+
+## ¿Qué son los Guards?
+
+Los **Guards** son componentes de React que protegen rutas específicas de la aplicación, verificando si el usuario cumple con ciertos requisitos antes de permitir el acceso. TMT implementa un sistema de cuatro guards para controlar el flujo de navegación.
+
+<Info>
+Todos los guards están ubicados en `src/guards/authGuard/` y utilizan Redux para verificar el estado de autenticación.
+</Info>
+
+## Tipos de Guards
+
+TMT utiliza cuatro guards principales:
+
+<CardGroup cols={2}>
+  <Card title="AuthGuard" icon="lock">
+    Protege rutas que requieren usuario autenticado
+  </Card>
+  
+  <Card title="GuestGuard" icon="door-open">
+    Protege rutas de login (solo para usuarios no autenticados)
+  </Card>
+  
+  <Card title="OfficeGuard" icon="building">
+    Protege rutas que requieren taquilla seleccionada
+  </Card>
+  
+  <Card title="OfficeAuth" icon="building-lock">
+    Redirige si ya hay taquilla autenticada
+  </Card>
+</CardGroup>
+
+## AuthGuard
+
+Protege las rutas que requieren un usuario autenticado. Si el usuario no ha iniciado sesión, lo redirige a `/auth/login`.
+
+### Implementación
+
+```javascript
+import { useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+
+const AuthGuard = ({ children }) => {
+  const isAuthenticated = useSelector((state)=> state.auth.isAuthenticated);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/auth/login', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  return children;
+};
+
+export default AuthGuard;
+```
+
+**Ubicación**: `src/guards/authGuard/AuthGuard.js`
+
+### Uso en el Router
+
+```javascript
+{
+  path: "/",
+  element: (
+    <AuthGuard>
+      <FullLayout />
+    </AuthGuard>
+  ),
+  children: [
+    { path: "/", element: <Navigate to="/taquillas" /> },
+    { path: "/taquillas", element: <Offices /> },
+    { path: "/eventos", element: <Events /> },
+    // ... más rutas protegidas
+  ],
+}
+```
+
+**Ubicación**: `src/routes/router.js:38-42`
+
+<Warning>
+**Importante**: El `AuthGuard` envuelve el layout completo, por lo que todas las rutas internas heredan esta protección.
+</Warning>
+
+## GuestGuard
+
+Protege las rutas de autenticación (login, registro, recuperación de contraseña) para que solo sean accesibles por usuarios NO autenticados. Si un usuario ya autenticado intenta acceder, lo redirige a `/taquillas`.
+
+### Implementación
+
+```javascript
+import { useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+
+const GuestGuard = ({ children }) => {
+  const isAuthenticated = useSelector((state)=> state.auth.isAuthenticated);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/taquillas', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  return children;
+};
+
+export default GuestGuard;
+```
+
+**Ubicación**: `src/guards/authGuard/GuestGaurd.js`
+
+### Uso en el Router
+
+```javascript
+{
+  path: "/auth",
+  element: (
+    <GuestGuard>
+      <BlankLayout />
+    </GuestGuard>
+  ),
+  children: [
+    { path: "/auth", element: <Navigate to="/auth/login" /> },
+    { path: "/auth/login", element: <Login /> },
+    { path: "/auth/olvido-contrasena", element: <ForgotPassword /> },
+    { path: "/auth/emailConfirmation/:uid_user/:email", element: <EmailConfirmation /> },
+  ],
+}
+```
+
+**Ubicación**: `src/routes/router.js:64-76`
+
+<Note>
+Este patrón previene que usuarios autenticados vean la pantalla de login innecesariamente.
+</Note>
+
+## OfficeGuard
+
+Protege las rutas que requieren que el usuario tenga una taquilla seleccionada. Si no hay taquilla autenticada, redirige a `/taquillas` para que el usuario seleccione una.
+
+### Implementación
+
+```javascript
+import { useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+
+const OfficeGuard = ({ children }) => {
+  const isAuthenticatedOffice = useSelector((state) => state.office.isAuthenticated);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isAuthenticatedOffice) {
+      navigate('/taquillas', { replace: true });
+    } 
+  }, [isAuthenticatedOffice, navigate]);
+
+  return children;
+};
+
+export default OfficeGuard;
+```
+
+**Ubicación**: `src/guards/authGuard/OfficeGuard.js`
+
+### Uso en el Router
+
+```javascript
+// Rutas protegidas por OfficeGuard
+{ path: "/eventos", element: (<OfficeGuard><Events /></OfficeGuard>) },
+{ path: "/checkout", element: (<OfficeGuard><CheckOut /></OfficeGuard>) },
+{ path: "/resumen-compra", element: (<OfficeGuard><OrderSummary /></OfficeGuard>) },
+{ path: "/cortesia", element: (<OfficeGuard><CourtesyTickets /></OfficeGuard>) },
+{ path: "/cortesia-proceso", element: (<OfficeGuard><CourtesyProcess /></OfficeGuard>) },
+{ path: "/cortesia-resumen", element: (<OfficeGuard><CourtesySummary /></OfficeGuard>) },
+```
+
+**Ubicación**: `src/routes/router.js:49-59`
+
+<Warning>
+**Crítico**: Todas las rutas relacionadas con ventas, eventos y checkout DEBEN estar protegidas por `OfficeGuard` para garantizar que el usuario tenga una taquilla asignada.
+</Warning>
+
+## OfficeAuth
+
+Es el inverso de `OfficeGuard`. Protege la ruta de selección de taquillas para que solo sea accesible si NO hay una taquilla autenticada. Si ya existe una taquilla seleccionada, redirige a `/eventos`.
+
+### Implementación
+
+```javascript
+import { useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+
+const OfficeAuth = ({ children }) => {
+  const isAuthenticatedOffice = useSelector((state) => state.office.isAuthenticated);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticatedOffice) {
+      navigate('/eventos', { replace: true });
+    }
+  }, [isAuthenticatedOffice, navigate]);
+
+  return children;
+};
+
+export default OfficeAuth;
+```
+
+**Ubicación**: `src/guards/authGuard/OfficeAuth.js`
+
+### Uso en el Router
+
+```javascript
+{ 
+  path: "/taquillas", 
+  element: (<OfficeAuth><Offices /></OfficeAuth>) 
+}
+```
+
+**Ubicación**: `src/routes/router.js:47`
+
+<Note>
+Esto previene que un usuario intente seleccionar otra taquilla mientras ya tiene una activa.
+</Note>
+
+## Flujo de Navegación Completo
+
+<Steps>
+  <Step title="Usuario no autenticado">
+    - Cualquier ruta → redirige a `/auth/login` (por `AuthGuard`)
+    - Puede acceder a rutas `/auth/*` protegidas por `GuestGuard`
+  </Step>
+  
+  <Step title="Usuario autenticado sin taquilla">
+    - Accede a `/taquillas` protegida por `OfficeAuth`
+    - NO puede acceder a `/eventos` ni rutas de venta (protegidas por `OfficeGuard`)
+  </Step>
+  
+  <Step title="Usuario autenticado con taquilla">
+    - NO puede acceder a `/taquillas` (protegida por `OfficeAuth`)
+    - Puede acceder a todas las rutas protegidas por `OfficeGuard`
+    - Acceso completo a eventos, ventas y checkout
+  </Step>
+</Steps>
+
+## Diagrama de Protección de Rutas
+
+```
+┌─────────────────────────────────────────┐
+│        Rutas Públicas (Error 404)      │
+└─────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────┐
+│     GuestGuard (Solo no autenticados)   │
+│  /auth/login                            │
+│  /auth/olvido-contrasena                │
+│  /auth/emailConfirmation                │
+└─────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────┐
+│      AuthGuard (Usuario requerido)      │
+│            FullLayout                   │
+└─────────────────────────────────────────┘
+         │                    │
+         ▼                    ▼
+┌──────────────────┐  ┌──────────────────┐
+│   OfficeAuth     │  │   OfficeGuard    │
+│ (Sin taquilla)   │  │ (Con taquilla)   │
+│   /taquillas     │  │    /eventos      │
+│                  │  │    /checkout     │
+│                  │  │    /cortesia     │
+└──────────────────┘  └──────────────────┘
+```
+
+## Consideraciones de Seguridad
+
+<Warning>
+**Importante**: Los guards son componentes de frontend y NO reemplazan la validación en el backend. Siempre valida permisos en el servidor.
+</Warning>
+
+### Mejores Prácticas
+
+1. **Usar `replace: true`**: Los guards utilizan `navigate` con la opción `replace: true` para evitar bucles de navegación
+
+2. **Dependencias en useEffect**: Los guards incluyen todas las dependencias necesarias en el array de `useEffect`
+
+3. **Validación en Redux**: Los guards consultan el estado de Redux, que se mantiene sincronizado con Firebase
+
+4. **Combinar guards**: Algunas rutas pueden requerir múltiples niveles de protección (como `AuthGuard` + `OfficeGuard`)
+
+## Debugging de Guards
+
+### Verificar estado de autenticación
+
+```javascript
+import { useSelector } from 'react-redux';
+
+const isAuthenticated = useSelector((state) => state.auth.isAuthenticated);
+const isAuthenticatedOffice = useSelector((state) => state.office.isAuthenticated);
+
+console.log('Usuario autenticado:', isAuthenticated);
+console.log('Taquilla autenticada:', isAuthenticatedOffice);
+```
+
+### Herramientas útiles
+
+- **Redux DevTools**: Inspecciona el estado de `auth` y `office`
+- **React Router DevTools**: Observa las transiciones de rutas
+- **Console.log**: Los guards pueden añadir logs temporales para debugging
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Visión General" icon="shield-halved" href="/auth/overview">
+    Vuelve a la visión general del sistema de autenticación
+  </Card>
+  
+  <Card title="Control de Permisos" icon="key" href="/auth/permissions">
+    Aprende sobre el control de acceso por taquilla
+  </Card>
+</CardGroup>

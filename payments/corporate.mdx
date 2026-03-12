@@ -1,0 +1,485 @@
+---
+title: 'Precios Corporativos'
+description: 'Sistema de precios especiales para clientes corporativos'
+icon: 'building'
+---
+
+## Introducción
+
+El sistema TMT incluye un mecanismo de precios corporativos que permite ofrecer tarifas especiales a clientes empresariales. Este sistema se aplica automáticamente cuando se identifica una compra como corporativa.
+
+<Info>
+  Los precios corporativos se configuran a nivel de zona/categoría de asiento y son opcionales. Si no hay precio corporativo configurado, se usa el precio regular.
+</Info>
+
+## Activación del Modo Corporativo
+
+El modo corporativo se activa mediante un selector en la interfaz de checkout:
+
+```javascript CheckOut.js (línea 53)
+const [clientType, setClientType] = useState('normal');
+```
+
+Los dos tipos de cliente disponibles son:
+
+<CardGroup cols={2}>
+  <Card title="Normal" icon="user">
+    Cliente individual o persona natural
+  </Card>
+  <Card title="Corporativo" icon="building">
+    Cliente empresarial con RIF
+  </Card>
+</CardGroup>
+
+## Estructura de Precios
+
+Cada zona o categoría de asiento puede tener dos precios:
+
+### Sistema Manual (Sin Seats.io)
+
+```javascript CheckOut.js (líneas 189-203)
+const seatsPerZone = sortedTickets.map((ticket) => {
+  return {
+    id: ticket.seat_id,
+    ticket_id: ticket.ticket_id,
+    price: zone.price,
+    corporate_price: zone.corporate_price,
+    status: ticket.status === true ? 'available' : 'unavailable',
+    status_offline: ticket.status_offline,
+    location: zone.name,
+    name: zone.name,
+    metadata: ''
+  }
+})
+```
+
+<ParamField path="price" type="number">
+  Precio regular del asiento
+</ParamField>
+
+<ParamField path="corporate_price" type="number">
+  Precio especial para clientes corporativos (opcional)
+</ParamField>
+
+### Sistema Seats.io
+
+```javascript CheckOut.js (líneas 954-966)
+const newSeat = {
+  id: `${categoryLabel}-${ticketForThisPerson.ticket_id.slice(-8)}-${personIndex}`,
+  seatsio_uuid: objectUuid,
+  seatsio_object: { ...object, quantity: 1, _originalNumSelected: object.numSelected, _personIndex: personIndex },
+  seatsio_category: categoryKey,
+  ticket_id: ticketForThisPerson.ticket_id,
+  price: seatsioTicketsMap[categoryLabel].price,
+  corporate_price: ticketForThisPerson.corporate_price,
+  status: 'available',
+  status_offline: ticketForThisPerson.status_offline,
+  location: categoryLabel,
+  name: `${categoryLabel} - Persona ${personIndex}`,
+  metadata: 'Seats.io',
+  zone: ticketForThisPerson.zone || categoryLabel,
+  event_id: ticketForThisPerson.event_id || eventData?.id,
+  ticket_data: ticketForThisPerson
+};
+```
+
+## Cálculo del Subtotal con Precios Corporativos
+
+El cálculo del subtotal determina automáticamente qué precio usar:
+
+```javascript CheckOut.js (líneas 712-718)
+const calculateSubtotal = () => {
+  const subtotal = selectedSeats.reduce((sum, seat) => {
+    const price = clientType === 'corporativo' ? (seat.corporate_price || seat.price) : seat.price;
+    return sum + (price || 0);
+  }, 0);
+  return truncateDecimals(subtotal, 2);
+};
+```
+
+### Lógica de Selección de Precio
+
+```javascript
+// Pseudocódigo explicativo
+if (clientType === 'corporativo') {
+  if (seat.corporate_price existe y es válido) {
+    usar seat.corporate_price
+  } else {
+    usar seat.price (fallback a precio regular)
+  }
+} else {
+  usar seat.price
+}
+```
+
+<Warning>
+  Si no existe un precio corporativo configurado para una zona, se utilizará automáticamente el precio regular, sin generar errores.
+</Warning>
+
+## Aplicación en Tickets Finales
+
+Al crear la orden, el precio corporativo se aplica individualmente a cada ticket:
+
+```javascript CheckOut.js (líneas 332-373)
+let tickets = selectedSeats.map((seat) => {
+  const baseMetadata = {
+    customer_name: values.customer_name,
+    customer_email: values.customer_email,
+    customer_phone: values.customer_phone,
+    customer_id: values.customer_id,
+    customer_id_type: values.customer_id_type,
+    customer_address: values.customer_address,
+    customer_country: countryObject,
+    ...(clientType === 'corporativo' && {
+      company_name: values.company_name,
+      company_rif: `${values.company_rif_type}-${values.company_rif}`,
+      company_address: values.company_address,
+      is_corporate: true
+    })
+  };
+
+  // Agregar metadata de Seats.io si aplica
+  if (seat.metadata === 'Seats.io' && seat.seatsio_object) {
+    baseMetadata.seatsio = {
+      object_id: seat.seatsio_object.id,
+      object_label: seat.seatsio_object.label,
+      object_type: seat.seatsio_object.objectType,
+      object_uuid: seat.seatsio_uuid,
+      category_key: seat.seatsio_category,
+      category_label: seat.location
+    };
+  }
+
+  // La lógica corporativa se aplica aquí, no en la selección
+  const finalAmount = clientType === 'corporativo' && seat.ticket_data?.corporate_price
+    ? seat.ticket_data.corporate_price
+    : seat.price;
+
+  return {
+    amount: finalAmount,
+    id: seat.id,
+    ticket_id: seat.ticket_id,
+    zone: seat.location,
+    metadata: baseMetadata
+  }
+})
+```
+
+<Note>
+  Cada ticket individual guarda el monto final aplicado (corporativo o regular) en el campo `amount`.
+</Note>
+
+## Campos Requeridos para Compras Corporativas
+
+Cuando se selecciona el tipo de cliente "corporativo", se activan campos adicionales obligatorios:
+
+### Validación con Yup
+
+```javascript CheckOut.js (líneas 221-230)
+...(clientType === 'corporativo' && {
+  company_name: Yup.string()
+    .required("Se requiere el Nombre de la Empresa"),
+  company_rif: Yup.string()
+    .required("Se requiere el RIF de la Empresa"),
+  company_rif_type: Yup.string()
+    .required("Se requiere el tipo de RIF"),
+  company_address: Yup.string()
+    .required("Se requiere la Dirección de la Empresa")
+})
+```
+
+### Campos del Formulario
+
+<ParamField path="company_name" type="string" required>
+  Nombre o razón social de la empresa
+</ParamField>
+
+<ParamField path="company_rif" type="string" required>
+  Número de RIF de la empresa (sin tipo)
+</ParamField>
+
+<ParamField path="company_rif_type" type="string" required>
+  Tipo de RIF: J (Jurídico), G (Gobierno), V (Venezolano), E (Extranjero)
+</ParamField>
+
+<ParamField path="company_address" type="string" required>
+  Dirección fiscal de la empresa
+</ParamField>
+
+### Valores Iniciales
+
+```javascript CheckOut.js (líneas 233-246)
+initialValues: {
+  customer_name: '',
+  customer_email: '',
+  customer_phone: '',
+  customer_id: '',
+  customer_id_type: 'V',
+  customer_address: '',
+  customer_country: 've',
+  company_name: '',
+  company_rif: '',
+  company_rif_type: 'J',
+  company_address: ''
+}
+```
+
+<Info>
+  El tipo de RIF por defecto es "J" (Jurídico), el más común para empresas.
+</Info>
+
+## Metadata Corporativa en Tickets
+
+Los tickets de compras corporativas incluyen información adicional:
+
+```javascript CheckOut.js (líneas 341-346)
+...(clientType === 'corporativo' && {
+  company_name: values.company_name,
+  company_rif: `${values.company_rif_type}-${values.company_rif}`,
+  company_address: values.company_address,
+  is_corporate: true
+})
+```
+
+### Estructura de Metadata
+
+```json
+{
+  "customer_name": "Juan Pérez",
+  "customer_email": "juan.perez@empresa.com",
+  "customer_phone": "+58 412 1234567",
+  "customer_id": "V-12345678",
+  "customer_id_type": "V",
+  "customer_address": "Calle Principal 123",
+  "customer_country": {
+    "code": "ve",
+    "name": "Venezuela",
+    "key": 0
+  },
+  "company_name": "Empresa Ejemplo C.A.",
+  "company_rif": "J-30123456-7",
+  "company_address": "Av. Principal, Torre Empresarial",
+  "is_corporate": true
+}
+```
+
+## Información Corporativa en la Orden
+
+La orden final incluye un flag indicando si es corporativa:
+
+```javascript CheckOut.js (líneas 375-400)
+let finalData = {
+  amount: finalTotalAmount,
+  event_id: eventData.id,
+  event_name: eventData.event.name,
+  client_id: eventData.client_id,
+  client_name: eventData.client_name,
+  office_id: officeData.id,
+  office_name: officeData.name,
+  status: true,
+  tickets: tickets,
+  transactions: transactions,
+  exchange_rate: usdCentralBank,
+  box_office_name: boxOfficeData.name,
+  box_office_id: boxOfficeData.id,
+  purchaser_info: {
+    name: values.customer_name,
+    email: values.customer_email,
+    phone: values.customer_phone,
+    id: values.customer_id,
+    id_type: values.customer_id_type,
+    address: values.customer_address,
+    country: countryObject
+  },
+  is_corporate: clientType === 'corporativo'
+};
+```
+
+<ParamField path="is_corporate" type="boolean">
+  Indica si la compra es corporativa. Útil para reportes y análisis.
+</ParamField>
+
+## Visualización en Email de Confirmación
+
+Los emails de confirmación muestran información corporativa cuando aplica:
+
+```javascript CheckOut.js (líneas 553-560)
+${clientType === 'corporativo' ? `
+<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
+    <p style="margin: 6px 0; font-size: 15px; color: #7c3aed;"><strong>🏢 Información Corporativa</strong></p>
+    <p style="margin: 6px 0; font-size: 15px;"><strong>Empresa:</strong> ${values.company_name}</p>
+    <p style="margin: 6px 0; font-size: 15px;"><strong>RIF:</strong> ${values.company_rif_type}-${values.company_rif}</p>
+    <p style="margin: 6px 0; font-size: 15px;"><strong>Dirección Empresa:</strong> ${values.company_address}</p>
+</div>
+` : ''}
+```
+
+## Validación de Compras Corporativas
+
+El sistema valida que todos los campos corporativos estén completos:
+
+```javascript CheckOut.js (líneas 786-798)
+const basicDataValid = selectedSeats.length > 0 &&
+  selectedPaymentMethods.length > 0 &&
+  formik.values.customer_name.trim() !== '' &&
+  formik.values.customer_email.trim() !== '' &&
+  formik.values.customer_phone.trim() !== '' &&
+  formik.values.customer_id.trim() !== '' &&
+  formik.values.customer_id_type.trim() !== '' &&
+  (clientType !== 'corporativo' || (
+    formik.values.company_name.trim() !== '' &&
+    formik.values.company_rif.trim() !== '' &&
+    formik.values.company_rif_type.trim() !== '' &&
+    formik.values.company_address.trim() !== ''
+  )) &&
+  Math.abs(enteredAmount - finalTotalAmount) < 0.01;
+```
+
+<Warning>
+  El formulario no se puede enviar hasta que todos los campos corporativos estén completos y válidos.
+</Warning>
+
+## Ejemplos de Uso
+
+### Ejemplo 1: Compra Normal vs Corporativa
+
+```javascript
+// Configuración de zona:
+const zone = {
+  name: "VIP",
+  price: 100.00,
+  corporate_price: 85.00
+};
+
+// Compra Normal:
+const normalSubtotal = 3 * zone.price;
+// normalSubtotal = 3 * 100.00 = $300.00
+
+// Compra Corporativa:
+const corporateSubtotal = 3 * zone.corporate_price;
+// corporateSubtotal = 3 * 85.00 = $255.00
+
+// Ahorro:
+const savings = normalSubtotal - corporateSubtotal;
+// savings = $45.00 (15% de descuento)
+```
+
+### Ejemplo 2: Zona sin Precio Corporativo
+
+```javascript
+// Configuración de zona:
+const zone = {
+  name: "General",
+  price: 50.00,
+  corporate_price: null  // No hay precio corporativo
+};
+
+// Compra Corporativa (usa precio regular):
+const corporateSubtotal = 2 * (zone.corporate_price || zone.price);
+// corporateSubtotal = 2 * 50.00 = $100.00
+// Usa precio regular porque corporate_price es null
+```
+
+### Ejemplo 3: Compra Mixta de Zonas
+
+```javascript
+// Cliente corporativo compra asientos de diferentes zonas:
+
+const selectedSeats = [
+  { zone: "VIP", price: 100.00, corporate_price: 85.00 },
+  { zone: "VIP", price: 100.00, corporate_price: 85.00 },
+  { zone: "Platea", price: 60.00, corporate_price: null },
+];
+
+// Cálculo:
+const subtotal = 
+  85.00 +  // VIP corporativo
+  85.00 +  // VIP corporativo
+  60.00;   // Platea (sin precio corporativo, usa regular)
+
+// subtotal = $230.00
+```
+
+## Tipos de RIF en Venezuela
+
+<Accordion title="J - Jurídico">
+  Para empresas privadas (C.A., S.R.L., etc.)
+  
+  Ejemplo: J-30123456-7
+</Accordion>
+
+<Accordion title="G - Gobierno">
+  Para entidades gubernamentales y organismos públicos
+  
+  Ejemplo: G-20001234-5
+</Accordion>
+
+<Accordion title="V - Venezolano">
+  Para personas naturales venezolanas que operan como empresas
+  
+  Ejemplo: V-12345678-9
+</Accordion>
+
+<Accordion title="E - Extranjero">
+  Para personas naturales extranjeras
+  
+  Ejemplo: E-98765432-1
+</Accordion>
+
+## Reportes y Análisis
+
+El campo `is_corporate` en las órdenes permite:
+
+1. **Generar reportes** de ventas corporativas vs. individuales
+2. **Analizar descuentos** otorgados a clientes corporativos
+3. **Segmentar clientes** para campañas de marketing
+4. **Calcular comisiones** diferenciadas
+5. **Exportar datos fiscales** para facturación
+
+```javascript
+// Ejemplo de query para reportes:
+const corporateOrders = orders.filter(order => order.is_corporate === true);
+const totalCorporateSales = corporateOrders.reduce((sum, order) => sum + order.amount, 0);
+```
+
+## Consideraciones Fiscales
+
+<Warning>
+  Las compras corporativas en Venezuela tienen implicaciones fiscales especiales:
+  
+  - Requieren factura con RIF
+  - Pueden ser deducibles de impuestos para la empresa
+  - Deben cumplir con normativas del SENIAT
+  - El IVA es recuperable para empresas registradas
+</Warning>
+
+## Beneficios del Sistema Corporativo
+
+<CardGroup cols={2}>
+  <Card title="Para las Empresas" icon="briefcase">
+    - Descuentos en compras por volumen
+    - Facturación con RIF
+    - Historial de compras organizacional
+    - Proceso de aprobación centralizado
+  </Card>
+  <Card title="Para TMT" icon="chart-line">
+    - Fidelización de clientes corporativos
+    - Ventas en volumen garantizadas
+    - Análisis de mercado B2B
+    - Relaciones comerciales a largo plazo
+  </Card>
+</CardGroup>
+
+## Próximos Pasos
+
+<CardGroup cols={3}>
+  <Card title="Vista General de Pagos" icon="credit-card" href="/payments/overview">
+    Vuelve a la introducción del sistema de pagos
+  </Card>
+  <Card title="Métodos de Pago" icon="wallet" href="/payments/methods">
+    Conoce los métodos de pago disponibles
+  </Card>
+  <Card title="Cálculo de Impuestos" icon="percent" href="/payments/taxes">
+    Entiende cómo se calculan IVA e IGTF
+  </Card>
+</CardGroup>

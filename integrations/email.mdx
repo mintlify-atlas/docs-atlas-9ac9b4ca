@@ -1,0 +1,595 @@
+---
+title: 'Sistema de Correos Electrónicos'
+description: 'Configuración y uso del sistema de envío de emails para confirmaciones de compra'
+icon: 'envelope'
+---
+
+## Descripción General
+
+TMT - Taquilla Física incluye un sistema completo de notificaciones por correo electrónico que envía confirmaciones de compra detalladas a los clientes después de completar una transacción.
+
+<Note>
+Los correos electrónicos se envían automáticamente mediante Firebase Cloud Functions utilizando un servicio de correo transaccional.
+</Note>
+
+## Características
+
+El sistema de correos incluye:
+
+- Confirmaciones de compra con diseño profesional
+- Detalles completos del evento y asientos
+- Información del comprador (individual o corporativo)
+- Resumen de transacciones y métodos de pago
+- Cálculo de impuestos (IVA, IGTF)
+- Enlaces de descarga de la app móvil
+- Plantillas HTML responsive
+
+## Configuración
+
+### Cloud Function de Envío
+
+La función `send_email` está declarada en Firebase:
+
+```javascript firebase.js
+import { getFunctions, httpsCallable } from "firebase/functions";
+
+const functions = getFunctions(app);
+const send_email = httpsCallable(functions, "send_email");
+
+export { send_email };
+```
+
+### Parámetros de la Función
+
+<CodeGroup>
+```javascript Estructura de Parámetros
+send_email({
+  to_email: string,      // Email del destinatario
+  to_name: string,       // Nombre del destinatario
+  html_send: string,     // Contenido HTML del email
+  subject: string        // Asunto del email
+})
+```
+</CodeGroup>
+
+## Implementación
+
+### Envío de Confirmación de Compra
+
+Después de crear una orden exitosamente, se envía el correo de confirmación:
+
+```javascript CheckOut.js
+import { send_email } from '../../guards/firebase/firebase';
+import moment from 'moment';
+import 'moment/locale/es';
+
+// Después de crear la orden
+const orderId = resp.data.order || 'ORD-' + Date.now().toString().substring(5);
+const customerEmail = values.customer_email;
+const customerName = values.customer_name;
+const subject = `Confirmación de compra: ${eventData?.event?.name || 'Evento'}`;
+
+// Formatear fecha del evento
+const eventDate = eventData?.date_start 
+  ? moment(eventData.date_start.toDate ? eventData.date_start.toDate() : eventData.date_start)
+      .locale('es')
+      .format('DD [de] MMMM [de] YYYY') 
+  : 'Fecha no disponible';
+
+const eventTime = eventData?.date_start 
+  ? moment(eventData.date_start.toDate ? eventData.date_start.toDate() : eventData.date_start)
+      .locale('es')
+      .format('h:mm a') 
+  : '';
+
+// Construir HTML del email
+const htmlContent = `...`; // Ver plantilla completa abajo
+
+// Enviar email
+send_email({
+  to_email: customerEmail,
+  to_name: customerName,
+  html_send: htmlContent,
+  subject: subject
+}).then(() => {
+  toast.info('Correo de confirmación enviado.');
+}).catch((error) => {
+  console.error('Error al enviar el correo para la orden:', orderId, error);
+  toast.error('No se pudo enviar el correo de confirmación.');
+});
+```
+
+## Plantilla de Email
+
+### Estructura HTML
+
+La plantilla incluye las siguientes secciones:
+
+<Steps>
+  <Step title="Encabezado">
+    Título de confirmación con gradiente y mensaje de agradecimiento
+  </Step>
+  
+  <Step title="Número de Orden">
+    ID de la orden destacado para referencia del cliente
+  </Step>
+  
+  <Step title="Detalles del Evento">
+    Nombre, fecha, hora, ubicación y taquilla
+  </Step>
+  
+  <Step title="Asientos Seleccionados">
+    Lista visual de todos los asientos comprados con zona
+  </Step>
+  
+  <Step title="Información del Comprador">
+    Datos personales y corporativos (si aplica)
+  </Step>
+  
+  <Step title="Detalles del Pago">
+    Métodos de pago utilizados con montos y referencias
+  </Step>
+  
+  <Step title="Resumen de Compra">
+    Desglose de subtotal, impuestos y total
+  </Step>
+  
+  <Step title="Descarga de App">
+    Enlaces a App Store y Google Play
+  </Step>
+</Steps>
+
+### Código de Plantilla Completo
+
+<CodeGroup>
+```javascript Plantilla HTML
+const htmlContent = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirmación de Compra</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f8fc; color: #333;">
+    <div style="max-width: 650px; margin: 0 auto; background-color: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);">
+        <!-- Encabezado -->
+        <div style="background: linear-gradient(135deg, #7c3aed 0%, #9f68ff 100%); padding: 35px 30px; text-align: center; color: white;">
+            <h1 style="margin: 0; font-size: 28px; font-weight: 700;">¡Compra Exitosa!</h1>
+            <p style="margin-top: 10px; font-size: 16px; opacity: 0.9;">Gracias por tu compra. Tu orden ha sido procesada exitosamente.</p>
+        </div>
+        
+        <!-- Orden ID -->
+        <div style="background-color: #f3f4f6; padding: 20px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+            <p style="margin: 0; font-size: 14px; color: #6b7280; font-weight: 500;">Número de Orden</p>
+            <p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #7c3aed;">${orderId}</p>
+        </div>
+        
+        <!-- Contenido principal -->
+        <div style="padding: 30px;">
+            <!-- Detalles del evento -->
+            <div style="margin-bottom: 25px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                <div style="background-color: #f9fafb; padding: 15px; border-bottom: 1px solid #e5e7eb;">
+                    <h2 style="margin: 0; font-size: 18px; color: #374151;">Detalles del Evento</h2>
+                </div>
+                <div style="padding: 20px;">
+                    <h3 style="margin: 0 0 12px 0; font-size: 20px; color: #111827;">${eventData?.event?.name || 'Evento'}</h3>
+                    <div style="font-size: 14px; color: #6b7280;">
+                        <p style="margin: 6px 0; display: flex; align-items: center;">
+                            <span style="display: inline-block; width: 18px; height: 18px; margin-right: 8px; text-align: center;">📅</span> 
+                            ${eventDate}
+                        </p>
+                        ${eventTime ? `<p style="margin: 6px 0; display: flex; align-items: center;">
+                            <span style="display: inline-block; width: 18px; height: 18px; margin-right: 8px; text-align: center;">🕒</span> 
+                            ${eventTime}
+                        </p>` : ''}
+                        <p style="margin: 6px 0; display: flex; align-items: center;">
+                            <span style="display: inline-block; width: 18px; height: 18px; margin-right: 8px; text-align: center;">📍</span> 
+                            ${eventData?.venue_name || 'Lugar no disponible'}
+                        </p>
+                        <p style="margin: 6px 0; display: flex; align-items: center;">
+                            <span style="display: inline-block; width: 18px; height: 18px; margin-right: 8px; text-align: center;">🎫</span> 
+                            Taquilla: ${officeData?.name || 'N/A'}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Asientos -->
+            <div style="margin-bottom: 25px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                <div style="background-color: #f9fafb; padding: 15px; border-bottom: 1px solid #e5e7eb;">
+                    <h2 style="margin: 0; font-size: 18px; color: #374151;">Asientos Seleccionados</h2>
+                </div>
+                <div style="padding: 20px;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: flex-start;">
+                        ${tickets.map(seat => `
+                            <div style="background-color: #f3e8ff; border-radius: 8px; padding: 12px 20px; text-align: center; box-shadow: 0 2px 5px rgba(124, 58, 237, 0.1); min-width: 80px;">
+                                <p style="margin: 0; font-weight: 600; color: #7c3aed; font-size: 16px;">${seat.id}</p>
+                                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6b7280;">${seat.zone}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Información del comprador -->
+            <div style="margin-bottom: 25px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                <div style="background-color: #f9fafb; padding: 15px; border-bottom: 1px solid #e5e7eb;">
+                    <h2 style="margin: 0; font-size: 18px; color: #374151;">Información del Comprador</h2>
+                </div>
+                <div style="padding: 20px;">
+                    <p style="margin: 6px 0; font-size: 15px;"><strong>Nombre:</strong> ${values.customer_name}</p>
+                    <p style="margin: 6px 0; font-size: 15px;"><strong>Identificación:</strong> ${values.customer_id_type}-${values.customer_id}</p>
+                    <p style="margin: 6px 0; font-size: 15px;"><strong>Correo:</strong> ${values.customer_email}</p>
+                    <p style="margin: 6px 0; font-size: 15px;"><strong>Teléfono:</strong> ${values.customer_phone}</p>
+                    ${values.customer_address ? `<p style="margin: 6px 0; font-size: 15px;"><strong>Dirección:</strong> ${values.customer_address}</p>` : ''}
+                    ${clientType === 'corporativo' ? `
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
+                        <p style="margin: 6px 0; font-size: 15px; color: #7c3aed;"><strong>🏢 Información Corporativa</strong></p>
+                        <p style="margin: 6px 0; font-size: 15px;"><strong>Empresa:</strong> ${values.company_name}</p>
+                        <p style="margin: 6px 0; font-size: 15px;"><strong>RIF:</strong> ${values.company_rif_type}-${values.company_rif}</p>
+                        <p style="margin: 6px 0; font-size: 15px;"><strong>Dirección Empresa:</strong> ${values.company_address}</p>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            
+            <!-- Detalles del pago -->
+            <div style="margin-bottom: 25px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                <div style="background-color: #f9fafb; padding: 15px; border-bottom: 1px solid #e5e7eb;">
+                    <h2 style="margin: 0; font-size: 18px; color: #374151;">Detalles del Pago</h2>
+                </div>
+                <div style="padding: 20px;">
+                    ${transactions.map(trans => `
+                        <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #f3f4f6;">
+                            <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600; color: #7c3aed;">${trans.payment_name}</p>
+                            <p style="margin: 4px 0; font-size: 14px;"><strong>Monto:</strong> ${trans.amount_currency === 'USD' ? '$' : 'BS '}${trans.amount.toFixed(2)}</p>
+                            ${trans.payment_data ? Object.entries(trans.payment_data)
+                .filter(([key]) => !['status', 'punto_venta'].includes(key))
+                .map(([key, value]) => `
+                                    <p style="margin: 4px 0; font-size: 14px;"><strong>${allNames[key] || key}:</strong> ${value}</p>
+                                `).join('') : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <!-- Resumen de compra -->
+            <div style="border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                <div style="background-color: #f9fafb; padding: 15px; border-bottom: 1px solid #e5e7eb;">
+                    <h2 style="margin: 0; font-size: 18px; color: #374151;">Resumen de la Compra</h2>
+                </div>
+                <div style="padding: 20px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <span style="font-size: 15px;">Entradas (${tickets.length})</span>
+                        <span style="font-size: 15px; font-weight: 500;"> $${subtotalForDisplay.toFixed(2)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <span style="font-size: 15px;">IVA (16%)</span>
+                        <span style="font-size: 15px; font-weight: 500;"> $${ivaForDisplay.toFixed(2)}</span>
+                    </div>
+                    ${igtfForDisplay > 0 ? `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                        <span style="font-size: 15px;">IGTF (3%)</span>
+                        <span style="font-size: 15px; font-weight: 500;"> $${igtfForDisplay.toFixed(2)}</span>
+                    </div>
+                    ` : ''}
+                    
+                    <div style="border-top: 1px solid #e5e7eb; margin: 15px 0; padding-top: 15px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="font-size: 16px; font-weight: 600;">Total (BS)</span>
+                            <span style="font-size: 16px; font-weight: 600;">${(finalTotalAmount * usdCentralBank).toFixed(2)}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="font-size: 16px; font-weight: 600;">Total</span>
+                            <span style="font-size: 16px; font-weight: 600; color: #7c3aed;">$${finalTotalAmount.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Descarga la App -->
+            <div style="margin-top: 30px; background: linear-gradient(135deg, #7c3aed 0%, #9f68ff 100%); border-radius: 10px; padding: 30px; text-align: center; color: white;">
+                <h2 style="margin: 0 0 15px 0; font-size: 22px; font-weight: 700;">📱 ¡Descarga Nuestra App!</h2>
+                <p style="margin: 0 0 25px 0; font-size: 15px; opacity: 0.95; line-height: 1.6;">
+                    Para ver y gestionar tus entradas compradas, descarga nuestra aplicación móvil oficial "Carticket" disponible para iOS y Android.
+                </p>
+                
+                <!-- Enlaces directos en texto -->
+                <div style="background-color: rgba(255,255,255,0.15); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                    <div style="background-color: white; color: #333; padding: 15px; border-radius: 6px; text-align: left; font-family: monospace; font-size: 12px; line-height: 1.8; word-break: break-all;">
+                        <p style="margin: 0 0 10px 0;"><strong>📱 Google Play:</strong><br/>https://play.google.com/store/apps/details?id=com.techve.tmt_user</p>
+                        <p style="margin: 0;"><strong>🍎 App Store:</strong><br/>https://apps.apple.com/ve/app/carticket/id6751547084</p>
+                    </div>
+                    <p style="margin: 12px 0 0 0; font-size: 12px; opacity: 0.9; text-align: left;">
+                        ℹ️ Copia y pega estos enlaces directamente en tu navegador para descargar la app oficial.
+                    </p>
+                </div>
+                
+                <p style="margin: 0; font-size: 13px; opacity: 0.85;">
+                    Accede a tus tickets, recibe notificaciones y disfruta de todas las funciones de nuestra plataforma.
+                </p>
+            </div>
+        </div>
+         
+        <!-- Pie de página -->
+        <div style="background-color: #f9fafb; padding: 25px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="margin: 0 0 10px 0; font-size: 14px; color: #6b7280;">Si tienes alguna pregunta, por favor contacta a nuestro servicio al cliente.</p>
+            <p style="margin: 0; font-size: 14px; color: #6b7280;">¡Gracias por tu compra!</p>
+        </div>
+    </div>
+</body>
+</html>
+`;
+```
+</CodeGroup>
+
+<Tip>
+La plantilla utiliza estilos inline para máxima compatibilidad con clientes de email.
+</Tip>
+
+## Datos Incluidos en el Email
+
+### Mapeo de Nombres de Campos
+
+Para mejorar la legibilidad, se mapean las claves técnicas a nombres amigables:
+
+```javascript
+const allNames = {
+  email: 'Correo',
+  name: 'Nombre',
+  phone: 'Teléfono',
+  bank: 'Banco',
+  bank_name: 'Banco',
+  origin_bank: 'Banco de Origen',
+  destination_bank: 'Banco de Destino',
+  destination_phone: 'Teléfono de Destino',
+  destination_id: 'Cédula de Destino',
+  reference_number: 'Número de Referencia',
+  account_number: 'Número de Cuenta',
+  processing_type: 'Tipo de Procesamiento',
+  payment_method: 'Método de Pago',
+  punto_venta: 'Punto de Venta'
+};
+```
+
+### Formateo de Fechas
+
+Las fechas se formatean usando Moment.js en español:
+
+```javascript
+import moment from 'moment';
+import 'moment/locale/es';
+
+const eventDate = moment(eventData.date_start.toDate())
+  .locale('es')
+  .format('DD [de] MMMM [de] YYYY');
+// Resultado: "15 de Marzo de 2026"
+
+const eventTime = moment(eventData.date_start.toDate())
+  .locale('es')
+  .format('h:mm a');
+// Resultado: "8:00 pm"
+```
+
+## Información por Tipo de Cliente
+
+El email adapta su contenido según el tipo de cliente:
+
+### Cliente Individual
+```javascript
+- Nombre
+- Identificación (V-12345678)
+- Correo electrónico
+- Teléfono
+- Dirección (opcional)
+```
+
+### Cliente Corporativo
+```javascript
+- Todos los datos individuales
+- Nombre de empresa
+- RIF (J-12345678-9)
+- Dirección de empresa
+```
+
+## Resumen de Transacciones
+
+El email incluye detalles de todos los métodos de pago utilizados:
+
+```javascript
+transactions.map(trans => `
+  <div>
+    <p>${trans.payment_name}</p>
+    <p>Monto: ${trans.amount_currency === 'USD' ? '$' : 'BS '}${trans.amount.toFixed(2)}</p>
+    ${trans.payment_data ? Object.entries(trans.payment_data)
+      .filter(([key]) => !['status', 'punto_venta'].includes(key))
+      .map(([key, value]) => `
+        <p><strong>${allNames[key] || key}:</strong> ${value}</p>
+      `).join('') : ''}
+  </div>
+`).join('')
+```
+
+## Cálculos de Impuestos
+
+El resumen incluye desglose de impuestos:
+
+- **Subtotal**: Suma de precios de tickets
+- **IVA (16%)**: Impuesto al Valor Agregado
+- **IGTF (3%)**: Impuesto a Grandes Transacciones Financieras (condicional)
+- **Total en USD**: Total final en dólares
+- **Total en BS**: Total convertido a bolívares
+
+```javascript
+<div>
+  <p>Entradas (${tickets.length}): $${subtotalForDisplay.toFixed(2)}</p>
+  <p>IVA (16%): $${ivaForDisplay.toFixed(2)}</p>
+  ${igtfForDisplay > 0 ? `<p>IGTF (3%): $${igtfForDisplay.toFixed(2)}</p>` : ''}
+  <p>Total (BS): ${(finalTotalAmount * usdCentralBank).toFixed(2)}</p>
+  <p>Total: $${finalTotalAmount.toFixed(2)}</p>
+</div>
+```
+
+## Enlaces a Aplicación Móvil
+
+El email incluye enlaces directos a las tiendas de aplicaciones:
+
+```javascript
+// Google Play
+https://play.google.com/store/apps/details?id=com.techve.tmt_user
+
+// App Store
+https://apps.apple.com/ve/app/carticket/id6751547084
+```
+
+<Note>
+Los enlaces se muestran en formato de texto copiable para máxima compatibilidad con clientes de email.
+</Note>
+
+## Manejo de Errores
+
+Implementa manejo robusto de errores:
+
+```javascript
+send_email({
+  to_email: customerEmail,
+  to_name: customerName,
+  html_send: htmlContent,
+  subject: subject
+}).then(() => {
+  toast.info('Correo de confirmación enviado.');
+}).catch((error) => {
+  console.error('Error al enviar el correo para la orden:', orderId, error);
+  toast.error('No se pudo enviar el correo de confirmación.');
+});
+```
+
+<Warning>
+No bloquees el flujo de compra si el email falla. El email es una notificación, no un requisito para completar la transacción.
+</Warning>
+
+## Diseño Responsive
+
+La plantilla utiliza técnicas para asegurar compatibilidad móvil:
+
+- Max-width de 650px para contenedor principal
+- Fuentes system-ui para renderizado consistente
+- Colores con alto contraste
+- Flexbox para layouts adaptativos
+- Tamaños de fuente relativos
+
+## Personalización
+
+### Colores de Marca
+
+Puedes personalizar los colores principales:
+
+```javascript
+// Color primario (púrpura)
+#7c3aed - Gradiente inicio
+#9f68ff - Gradiente fin
+
+// Fondos
+#f8f8fc - Fondo exterior
+#ffffff - Fondo contenido
+#f3f4f6 - Fondo secciones
+
+// Textos
+#333333 - Texto principal
+#6b7280 - Texto secundario
+#374151 - Títulos
+```
+
+### Agregar Nuevas Secciones
+
+Para agregar una nueva sección:
+
+```javascript
+<!-- Nueva Sección -->
+<div style="margin-bottom: 25px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+    <div style="background-color: #f9fafb; padding: 15px; border-bottom: 1px solid #e5e7eb;">
+        <h2 style="margin: 0; font-size: 18px; color: #374151;">Título de la Sección</h2>
+    </div>
+    <div style="padding: 20px;">
+        <!-- Contenido -->
+    </div>
+</div>
+```
+
+## Testing
+
+Para probar el sistema de emails:
+
+<Steps>
+  <Step title="Realizar Compra de Prueba">
+    Completa una transacción en modo de prueba
+  </Step>
+  
+  <Step title="Verificar Consola">
+    Revisa los logs para confirmar el envío
+  </Step>
+  
+  <Step title="Revisar Bandeja">
+    Verifica que el email llegue correctamente
+  </Step>
+  
+  <Step title="Probar Renderizado">
+    Abre el email en diferentes clientes (Gmail, Outlook, etc.)
+  </Step>
+</Steps>
+
+## Solución de Problemas
+
+### Email no se envía
+
+<Steps>
+  <Step title="Verificar Cloud Function">
+    Confirma que la función `send_email` esté desplegada
+  </Step>
+  
+  <Step title="Revisar Logs">
+    Consulta los logs de Firebase Functions
+  </Step>
+  
+  <Step title="Verificar Cuota">
+    Asegúrate de no haber excedido límites de envío
+  </Step>
+</Steps>
+
+### Email llega a spam
+
+Para evitar que los emails lleguen a spam:
+
+1. Configura SPF y DKIM en tu dominio
+2. Utiliza un servicio de email transaccional reputado
+3. Evita palabras spam en el asunto
+4. Mantén una ratio baja de rebotes
+
+### Formato incorrecto
+
+Si el email no se ve bien:
+
+1. Verifica que uses estilos inline
+2. Evita CSS complejo
+3. Prueba en múltiples clientes de email
+4. Usa herramientas como Litmus para testing
+
+## Mejores Prácticas
+
+<Tip>
+**Recomendaciones para emails transaccionales:**
+
+- Mantén el HTML simple y semántico
+- Usa tablas para layouts complejos
+- Incluye versión de texto plano
+- Optimiza el peso total del email
+- Incluye información de contacto clara
+- Proporciona enlaces de ayuda
+</Tip>
+
+## Recursos Adicionales
+
+- [Email Template Best Practices](https://www.campaignmonitor.com/dev-resources/guides/)
+- [Can I Email](https://www.caniemail.com/) - Compatibilidad de CSS en emails
+- [Firebase Email Extension](https://firebase.google.com/products/extensions/firestore-send-email)

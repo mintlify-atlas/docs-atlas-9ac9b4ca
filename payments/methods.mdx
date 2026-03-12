@@ -1,0 +1,551 @@
+---
+title: 'Métodos de Pago'
+description: 'Guía completa de los métodos de pago disponibles en TMT'
+icon: 'wallet'
+---
+
+## Métodos de Pago Disponibles
+
+TMT soporta múltiples métodos de pago que se cargan dinámicamente desde la configuración de cada taquilla. Los métodos se pueden combinar en una misma transacción.
+
+```javascript CheckOut.js (líneas 78-87)
+const querySnapshot2 = await getDocs(collection(db, `/offices/${officeData?.id}/payment_methods`));
+let PaymentMethodsFinal = [];
+let PaymentMethodsFinal2 = [];
+querySnapshot2.forEach((resp) => {
+  const data = resp.data();
+  PaymentMethodsFinal.push({ label: data.name, value: data.method, id: data.payment_method_id });
+  PaymentMethodsFinal2.push(data);
+});
+setPaymentMethods(PaymentMethodsFinal);
+setPaymentMethodsData(PaymentMethodsFinal2);
+```
+
+<Note>
+  Cada taquilla puede tener configurados diferentes métodos de pago según sus necesidades operativas.
+</Note>
+
+## 1. Zelle (USD)
+
+### Descripción
+Pago internacional vía Zelle para transacciones en dólares estadounidenses.
+
+### Campos Requeridos
+
+<ParamField path="email" type="string" required>
+  Correo electrónico del remitente
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Nombre o razón social del remitente
+</ParamField>
+
+<ParamField path="phone" type="string" required>
+  Número de teléfono del remitente (formato internacional)
+</ParamField>
+
+### Implementación
+
+```javascript CheckOut.js (líneas 1324-1368)
+case 'Zelle':
+  return (
+    <div className="space-y-2">
+      <h3 className="font-semibold">Detalles del Zelle</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <InputText 
+          placeholder="Correo Electrónico" 
+          className="w-full" 
+          onChange={(e) => {
+            const methodId = selectedPaymentMethods.find(id => {
+              const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+              return methodInfo && methodInfo.method === method;
+            });
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'email', e.target.value);
+          }} 
+        />
+        <InputText 
+          placeholder="Nombre / Razón Social" 
+          className="w-full" 
+          onChange={(e) => {
+            const methodId = selectedPaymentMethods.find(id => {
+              const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+              return methodInfo && methodInfo.method === method;
+            });
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'name', e.target.value);
+          }} 
+        />
+        <div className="col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Número de teléfono
+          </label>
+          <MuiTelInput
+            value={additionalPaymentData[methodId]?.phone || ''}
+            onChange={(value) => {
+              if (methodId) handleAdditionalPaymentDataChange(methodId, 'phone', value);
+            }}
+            preferredCountries={['VE', 'US']}
+            defaultCountry='VE'
+            placeholder="+1 234 567 8900"
+          />
+        </div>
+      </div>
+    </div>
+  );
+```
+
+### Validación
+
+```javascript CheckOut.js (líneas 1173-1177)
+case 'Zelle':
+  if (!methodData.email || !methodData.name || !methodData.phone) {
+    return false;
+  }
+  break;
+```
+
+## 2. Pago Móvil (VES)
+
+### Descripción
+Sistema de pago móvil venezolano para transacciones en bolívares.
+
+### Campos Requeridos
+
+<ParamField path="reference_number" type="string" required>
+  Número de referencia de la transacción (solo números)
+</ParamField>
+
+<ParamField path="bank" type="string" required>
+  Banco desde el cual se realizó el pago móvil
+</ParamField>
+
+<ParamField path="phone" type="string" required>
+  Número de teléfono desde el cual se realizó el pago
+</ParamField>
+
+### Características Especiales
+
+<Info>
+  El sistema detecta automáticamente si el pago móvil es procesado por TMT mediante el campo `client_id`.
+</Info>
+
+```javascript CheckOut.js (líneas 272-274)
+if (payments.method === "Pago Móvil") {
+  pointSaleTmt = payments.client && payments.client.client_id === "TMT";
+}
+```
+
+### Implementación
+
+```javascript CheckOut.js (líneas 1370-1441)
+case 'Pago Móvil':
+  return (
+    <div className="space-y-2">
+      <h3 className="font-semibold">Detalles de pago móvil</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <InputText
+          placeholder="Número de Referencia"
+          className="w-full"
+          onInput={(e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+          }}
+          onChange={(e) => {
+            const methodId = selectedPaymentMethods.find(id => {
+              const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+              return methodInfo && methodInfo.method === method;
+            });
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'reference_number', e.target.value);
+          }}
+        />
+        <Dropdown
+          value={additionalPaymentData[methodId]?.bank || ''}
+          onChange={(e) => {
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'bank', e.value);
+          }}
+          options={bank_data}
+          placeholder="Seleccione un banco"
+          style={{ width: '100%' }}
+        />
+        <div className="col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Número de teléfono
+          </label>
+          <MuiTelInput
+            value={additionalPaymentData[methodId]?.phone || ''}
+            onChange={(value) => {
+              if (methodId) handleAdditionalPaymentDataChange(methodId, 'phone', value);
+            }}
+            preferredCountries={['VE', 'US']}
+            defaultCountry='VE'
+            placeholder="+1 234 567 8900"
+          />
+        </div>
+      </div>
+    </div>
+  );
+```
+
+## 3. Transferencia Bancaria Nacional (VES)
+
+### Descripción
+Transferencias bancarias en bolívares entre bancos venezolanos.
+
+### Campos Requeridos
+
+<ParamField path="reference_number" type="string" required>
+  Número de referencia de la transferencia
+</ParamField>
+
+<ParamField path="account_number" type="string" required>
+  Número de cuenta desde la cual se realizó la transferencia
+</ParamField>
+
+<ParamField path="bank" type="string" required>
+  Banco de origen de la transferencia
+</ParamField>
+
+### Implementación
+
+```javascript CheckOut.js (líneas 1443-1478)
+case 'Transferencia Bancaria Nacional':
+  return (
+    <div className="space-y-2">
+      <h3 className="font-semibold">Detalles de la Transferencia Bancaria</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <InputText
+          placeholder="Número de Referencia"
+          className="w-full"
+          onInput={(e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+          }}
+          onChange={(e) => {
+            const methodId = selectedPaymentMethods.find(id => {
+              const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+              return methodInfo && methodInfo.method === method;
+            });
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'reference_number', e.target.value);
+          }}
+        />
+        <InputText 
+          placeholder="Número de Cuenta" 
+          className="w-full" 
+          onChange={(e) => {
+            const methodId = selectedPaymentMethods.find(id => {
+              const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+              return methodInfo && methodInfo.method === method;
+            });
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'account_number', e.target.value);
+          }} 
+        />
+        <InputText 
+          placeholder="Banco" 
+          className="w-full" 
+          onChange={(e) => {
+            const methodId = selectedPaymentMethods.find(id => {
+              const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+              return methodInfo && methodInfo.method === method;
+            });
+            if (methodId) handleAdditionalPaymentDataChange(methodId, 'bank', e.target.value);
+          }} 
+        />
+      </div>
+    </div>
+  );
+```
+
+## 4. Tarjetas de Crédito y Débito
+
+### Descripción
+Pagos con tarjetas de crédito o débito procesados mediante puntos de venta.
+
+### Campos Requeridos
+
+<ParamField path="punto_venta" type="string" required>
+  Punto de venta utilizado: "tmt" o "productora"
+</ParamField>
+
+<ParamField path="reference_number" type="string" required>
+  Número de referencia de la transacción del punto de venta
+</ParamField>
+
+### Sistema de Puntos de Venta
+
+Las tarjetas pueden procesarse mediante dos tipos de puntos de venta:
+
+<Accordion title="TMT (por defecto)">
+  Punto de venta propio de TMT. Se marca automáticamente con `point_sale_tmt: true`.
+</Accordion>
+
+<Accordion title="Productora">
+  Punto de venta de la productora del evento. Se marca con `point_sale_tmt: false`.
+</Accordion>
+
+```javascript CheckOut.js (líneas 275-278)
+else if (payments.method === "Tarjeta de Crédito" || payments.method === "Tarjeta de Debito") {
+  // Solo para tarjetas que tienen selector manual, verificar la selección
+  pointSaleTmt = additionalPaymentData[payments.payment_method_id]?.punto_venta === 'tmt';
+}
+```
+
+### Implementación de Selector
+
+```javascript CheckOut.js (líneas 1493-1595)
+case 'Tarjeta de Crédito':
+  return (
+    <div>
+      <h3 className="font-semibold">Pago con Tarjeta de Crédito</h3>
+      <p>Por favor Ingrese el monto a pagar con la tarjeta.</p>
+      <div className="mt-4">
+        <h4 className="font-medium mb-2">Punto de venta utilizado:</h4>
+        <div className="grid grid-cols-2 gap-4">
+          <div
+            className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-all hover:border-blue-500 ${
+              (additionalPaymentData[methodId]?.punto_venta || 'tmt') === 'tmt' 
+                ? 'border-blue-500 bg-blue-50' 
+                : 'border-gray-300'
+            }`}
+            onClick={() => {
+              const methodId = selectedPaymentMethods.find(id => {
+                const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+                return methodInfo && methodInfo.method === method;
+              });
+              if (methodId) handleAdditionalPaymentDataChange(methodId, 'punto_venta', 'tmt');
+            }}
+          >
+            <div className="flex items-center justify-center mb-2">
+              <RadioButton
+                inputId={`punto-tmt-${method}`}
+                name={`punto-venta-${method}`}
+                value="tmt"
+                onChange={() => {
+                  const methodId = selectedPaymentMethods.find(id => {
+                    const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+                    return methodInfo && methodInfo.method === method;
+                  });
+                  if (methodId) handleAdditionalPaymentDataChange(methodId, 'punto_venta', 'tmt');
+                }}
+                checked={(additionalPaymentData[methodId]?.punto_venta || 'tmt') === 'tmt'}
+              />
+              <label className="ml-2 font-medium">TMT</label>
+            </div>
+            <div className="text-sm text-gray-600 text-center">
+              Punto de venta de TMT
+            </div>
+          </div>
+          <div
+            className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-all hover:border-blue-500 ${
+              (additionalPaymentData[methodId]?.punto_venta || 'tmt') === 'productora' 
+                ? 'border-blue-500 bg-blue-50' 
+                : 'border-gray-300'
+            }`}
+            onClick={() => {
+              const methodId = selectedPaymentMethods.find(id => {
+                const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+                return methodInfo && methodInfo.method === method;
+              });
+              if (methodId) handleAdditionalPaymentDataChange(methodId, 'punto_venta', 'productora');
+            }}
+          >
+            <div className="flex items-center justify-center mb-2">
+              <RadioButton
+                inputId={`punto-productora-${method}`}
+                name={`punto-venta-${method}`}
+                value="productora"
+                onChange={() => {
+                  const methodId = selectedPaymentMethods.find(id => {
+                    const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+                    return methodInfo && methodInfo.method === method;
+                  });
+                  if (methodId) handleAdditionalPaymentDataChange(methodId, 'punto_venta', 'productora');
+                }}
+                checked={(additionalPaymentData[methodId]?.punto_venta || 'tmt') === 'productora'}
+              />
+              <label className="ml-2 font-medium">Productora</label>
+            </div>
+            <div className="text-sm text-gray-600 text-center">
+              Punto de venta de la Productora
+            </div>
+          </div>
+        </div>
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Número de Referencia</label>
+          <InputText
+            placeholder="Ingrese el número de referencia"
+            className="w-full"
+            value={additionalPaymentData[methodId]?.reference_number || ''}
+            onChange={(e) => {
+              const methodId = selectedPaymentMethods.find(id => {
+                const methodInfo = paymentMethodsData.find(m => m.payment_method_id === id);
+                return methodInfo && methodInfo.method === method;
+              });
+              if (methodId) handleAdditionalPaymentDataChange(methodId, 'reference_number', e.target.value);
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+```
+
+## 5. Efectivo
+
+### Efectivo en Dólares (USD)
+Pago en efectivo en dólares estadounidenses directamente en el mostrador.
+
+```javascript CheckOut.js (líneas 1479-1485)
+case 'Efectivo Dolares':
+  return (
+    <div>
+      <h3 className="font-semibold">Pago en Efectivo</h3>
+      <p>Por favor Ingrese el monto pago en el mostrador.</p>
+    </div>
+  );
+```
+
+### Efectivo en Bolívares (VES)
+Pago en efectivo en bolívares directamente en el mostrador.
+
+```javascript CheckOut.js (líneas 1486-1492)
+case 'Efectivo Bolívares':
+  return (
+    <div>
+      <h3 className="font-semibold">Pago en Efectivo (Bolívares)</h3>
+      <p>Por favor Ingrese el monto pago en el mostrador en Bolívares.</p>
+    </div>
+  );
+```
+
+<Info>
+  Los pagos en efectivo no requieren campos adicionales, solo el monto.
+</Info>
+
+## Pagos Mixtos
+
+El sistema permite combinar múltiples métodos de pago en una sola transacción:
+
+```javascript CheckOut.js (líneas 1201-1224)
+const togglePaymentMethod = (method) => {
+  const methodId = method.id;
+  const isCurrentlySelected = selectedPaymentMethods.includes(methodId);
+
+  if (isCurrentlySelected) {
+    // Deselect it
+    setSelectedPaymentMethods(selectedPaymentMethods.filter(id => id !== methodId));
+    // Remove amount
+    setPaymentAmounts(currentAmounts => {
+      const newAmounts = { ...currentAmounts };
+      delete newAmounts[methodId];
+      return newAmounts;
+    });
+    // Remove additional data
+    setAdditionalPaymentData(prevData => {
+      const newData = { ...prevData };
+      delete newData[methodId];
+      return newData;
+    });
+  } else {
+    // Select it
+    setSelectedPaymentMethods([...selectedPaymentMethods, methodId]);
+  }
+};
+```
+
+### Cálculo de Montos Totales
+
+```javascript CheckOut.js (líneas 1141-1157)
+const getTotalEnteredAmount = () => {
+  let totalInUSD = 0;
+  for (const methodId in paymentAmounts) {
+    const amount = parseFloat(paymentAmounts[methodId] || 0);
+    if (amount > 0) {
+      const methodData = paymentMethodsData.find(p => p.payment_method_id === methodId);
+      if (methodData) {
+        if (methodData.currency === 'USD') {
+          totalInUSD += amount;
+        } else {
+          totalInUSD += (amount / usdCentralBank);
+        }
+      }
+    }
+  }
+  return totalInUSD;
+};
+```
+
+<Warning>
+  El sistema valida que la suma de todos los métodos de pago coincida exactamente con el total a pagar (incluyendo impuestos). Se permite una diferencia máxima de 0.01 USD.
+</Warning>
+
+## Cuentas de Custodia
+
+Algunos métodos de pago pueden tener cuentas de custodia asociadas:
+
+```javascript CheckOut.js (líneas 282-298)
+if (payments.custody_account?.id && payments.custody_account?.id.id !== '') {
+  try {
+    const custodyAccountDoc = await getDoc(doc(db, `custody_accounts/${payments.custody_account?.id}`));
+    if (custodyAccountDoc.exists()) {
+      const accountData = custodyAccountDoc.data();
+      payments.custody_account = {
+        ...payments.custody_account,
+        account_number: accountData.metadata?.account_number || ''
+      };
+    }
+  } catch (error) {
+    console.error("Error al obtener cuenta custodia:", error);
+  }
+}
+```
+
+## Validación Completa
+
+La función `arePaymentMethodFieldsComplete` valida todos los campos requeridos:
+
+```javascript CheckOut.js (líneas 1164-1199)
+const arePaymentMethodFieldsComplete = () => {
+  for (const methodId of selectedPaymentMethods) {
+    const methodInfo = paymentMethodsData.find(m => m.payment_method_id === methodId);
+    if (!methodInfo) continue;
+
+    const methodData = additionalPaymentData[methodId] || {};
+
+    // Validaciones específicas según el tipo de método
+    switch (methodInfo.method) {
+      case 'Zelle':
+        if (!methodData.email || !methodData.name || !methodData.phone) {
+          return false;
+        }
+        break;
+      case 'Pago Móvil':
+        if (!methodData.reference_number || !methodData.phone || !methodData.bank) {
+          return false;
+        }
+        break;
+      case 'Transferencia Bancaria Nacional':
+        if (!methodData.reference_number || !methodData.account_number || !methodData.bank) {
+          return false;
+        }
+        break;
+      case 'Tarjeta de Crédito':
+      case 'Tarjeta de Debito':
+        if (!methodData.reference_number) {
+          return false;
+        }
+        break;
+      // Para otros métodos, no requerimos campos adicionales
+    }
+  }
+
+  return true;
+};
+```
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Cálculo de Impuestos" icon="percent" href="/payments/taxes">
+    Aprende cómo se calculan IVA e IGTF
+  </Card>
+  <Card title="Precios Corporativos" icon="building" href="/payments/corporate">
+    Sistema de precios especiales para empresas
+  </Card>
+</CardGroup>

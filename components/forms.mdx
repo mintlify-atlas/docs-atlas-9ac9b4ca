@@ -1,0 +1,75 @@
+---
+title: "Formularios"
+description: "Componentes de entrada y validación de formularios con Formik y Yup"
+---
+
+## Input Component
+
+El componente `Input` es un campo de entrada estilizado con Tailwind:
+
+```javascript src/components/ui/Input.js
+import * as React from "react";
+import { cn } from "../../utils/cn";
+
+const Input = React.forwardRef(({ className, type, ...props }, ref) => {
+  return (
+    <input
+      type={type}
+      className={cn(
+        "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      )}
+      ref={ref}
+      {...props}
+    />
+  );
+});
+```
+
+### Uso Básico
+
+```javascript
+import { Input } from '@/components/ui/Input';
+
+<Input 
+  type="text" 
+  placeholder="Nombre completo"
+  value={value}
+  onChange={(e) => setValue(e.target.value)}
+/>
+```
+
+## Integración con Formik
+
+TMT usa Formik para gestión de formularios:
+
+```javascript
+import { useFormik } from 'formik';
+import * as Yup from 'yup';
+
+const validationSchema = Yup.object().shape({
+  customer_name: Yup.string().required("Nombre requerido"),
+  customer_email: Yup.string().email("Email inválido").required("Email requerido"),
+});
+
+const formik = useFormik({
+  initialValues: {
+    customer_name: '',
+    customer_email: '',
+  },
+  validationSchema,
+  onSubmit: async (values) => {
+    // Procesar formulario
+  },
+});
+```
+
+<Note>
+Ver más detalles en la documentación de [Checkout](/features/checkout).
+</Note>
+
+## Próximos Pasos
+
+<Card title="Proceso de Checkout" icon="cart-shopping" href="/features/checkout" horizontal>
+  Ver formularios completos en acción
+</Card>

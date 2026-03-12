@@ -1,0 +1,373 @@
+---
+title: "Proceso de Checkout"
+description: "Flujo completo de compra de tickets con selección de asientos, datos del cliente y procesamiento de pagos"
+---
+
+## Introducción
+
+El proceso de checkout de TMT es un flujo de dos pasos diseñado para garantizar una experiencia de compra fluida y segura. Combina selección de asientos, validación de datos del cliente, múltiples métodos de pago y cálculo automático de impuestos.
+
+## Flujo de Checkout en Dos Pasos
+
+<Steps>
+  <Step title="Paso 1: Selección de Asientos">
+    - Visualización de asientos disponibles (manual o Seats.io)
+    - Selección múltiple de asientos
+    - Cálculo de subtotal en tiempo real
+    - Vista previa de asientos seleccionados
+  </Step>
+  
+  <Step title="Paso 2: Información de Pago">
+    - Datos del cliente (nombre, email, teléfono, ID)
+    - Selección de métodos de pago
+    - Cálculo de impuestos (IVA, IGTF)
+    - Confirmación y procesamiento
+    - Reserva de asientos (10 minutos)
+  </Step>
+</Steps>
+
+<Warning>
+Los asientos se reservan por **10 minutos** (600 segundos) al entrar al Paso 2. Si el tiempo expira, los asientos se liberan automáticamente.
+</Warning>
+
+## Estado del Checkout
+
+El componente `CheckOut` maneja múltiples estados para gestionar el flujo:
+
+```javascript src/views/checkout/CheckOut.js
+const CheckOut = () => {
+  // Estados principales
+  const [step, setStep] = useState(1);
+  const [selectedSeats, setSelectedSeats] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(600); // 10 minutos
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  
+  // Estados de pago
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [selectedPaymentMethods, setSelectedPaymentMethods] = useState([]);
+  const [paymentAmounts, setPaymentAmounts] = useState({});
+  
+  // Estados de cliente
+  const [clientType, setClientType] = useState('normal'); // 'normal' | 'corporativo'
+  
+  // Estados de Seats.io
+  const [hasSeatsioMap, setHasSeatsioMap] = useState(false);
+  const [seatsioHoldToken, setSeatsioHoldToken] = useState(null);
+};
+```
+
+## Paso 1: Selección de Asientos
+
+### Sistemas de Selección
+
+TMT soporta dos sistemas de selección de asientos:
+
+<Tabs>
+  <Tab title="Sistema Manual">
+    Sistema de grilla con botones clickeables. Los asientos se cargan desde Firestore:
+    
+    ```javascript
+    const generateSeats = (zone, tickets) => {
+      const sortedTickets = tickets.sort((a, b) => {
+        const numA = parseInt(a.seat_id.match(/\d+/)[0], 10);
+        const numB = parseInt(b.seat_id.match(/\d+/)[0], 10);
+        return numA - numB;
+      });
+
+      return sortedTickets.map((ticket) => ({
+        id: ticket.seat_id,
+        ticket_id: ticket.ticket_id,
+        price: zone.price,
+        corporate_price: zone.corporate_price,
+        status: ticket.status === true ? 'available' : 'unavailable',
+        location: zone.name,
+      }));
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Seats.io">
+    Mapa interactivo con selección visual. Se detecta automáticamente:
+    
+    ```javascript
+    const eventDoc = await getDoc(doc(db, 'events', eventData?.id));
+    
+    if (eventDoc.exists()) {
+      const eventDataFromDb = eventDoc.data();
+      if (eventDataFromDb.seatsio_event?.chartKey) {
+        setHasSeatsioMap(true);
+        setSeatsioEventData(eventDataFromDb.seatsio_event);
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Cálculo de Precios
+
+Los precios varían según el tipo de cliente:
+
+```javascript
+const calculateSubtotal = () => {
+  const subtotal = selectedSeats.reduce((sum, seat) => {
+    const price = clientType === 'corporativo' 
+      ? (seat.corporate_price || seat.price) 
+      : seat.price;
+    return sum + (price || 0);
+  }, 0);
+  return truncateDecimals(subtotal, 2);
+};
+```
+
+<Info>
+Los precios corporativos se aplican automáticamente cuando `clientType === 'corporativo'` y el asiento tiene `corporate_price` definido.
+</Info>
+
+## Paso 2: Información de Pago
+
+### Transición al Paso 2
+
+Al confirmar los asientos, el sistema realiza varias acciones:
+
+```javascript
+const goToStep2 = async () => {
+  setSubmitConfirmSeat(true);
+  dispatch(setLoadingData({ loading: true }));
+  dispatch(fetchSetup()); // Cargar configuración global
+
+  // Reservar asientos por 10 minutos
+  const seatsArray = selectedSeats.map((seat) => seat.ticket_id);
+  const lockSeats = await tickets_lock({ 
+    ticketd_reserved: seatsArray, 
+    reserved_time: 600 
+  });
+
+  if (lockSeats.data.valido) {
+    setStep(2);
+    resetStep2Fields();
+    setIsTimerRunning(true); // Iniciar temporizador
+  } else {
+    // Mostrar asientos no disponibles
+    lockSeats.data.nodisponible.forEach((id) => {
+      const ticketsFilter = selectedSeats.filter((x) => x.ticket_id === id);
+      ticketsFilter.forEach((tickets) => {
+        toast.error(`El ticket ${tickets.id} no está disponible`);
+      });
+    });
+  }
+};
+```
+
+<Warning>
+Si algún asiento no está disponible al intentar reservar, el usuario permanece en el Paso 1 y debe seleccionar asientos diferentes.
+</Warning>
+
+### Temporizador de Reserva
+
+El temporizador visual muestra el tiempo restante:
+
+```javascript
+useEffect(() => {
+  let timer;
+  if (isTimerRunning && timeLeft > 0) {
+    timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+  } else if (timeLeft === 0) {
+    setShowTimeoutDialog(true);
+    setIsTimerRunning(false);
+  }
+  return () => clearTimeout(timer);
+}, [isTimerRunning, timeLeft]);
+```
+
+## Validación del Formulario
+
+El formulario utiliza Formik + Yup para validación:
+
+```javascript
+const OrderSchema = Yup.object().shape({
+  customer_email: Yup.string()
+    .email("El correo electrónico es inválido")
+    .required("Se requiere el Correo Electrónico del cliente"),
+  customer_name: Yup.string()
+    .required("Se requiere el Nombre del cliente"),
+  customer_phone: Yup.string()
+    .required("Se requiere el Teléfono del cliente"),
+  customer_id: Yup.string()
+    .required("Se requiere la Cédula de Identidad del cliente"),
+  customer_id_type: Yup.string()
+    .required("Se requiere el tipo de documento"),
+  customer_address: Yup.string()
+    .required("Se requiere la Dirección del cliente"),
+  customer_country: Yup.string()
+    .required("Se requiere el País del cliente"),
+  // Campos adicionales para clientes corporativos
+  ...(clientType === 'corporativo' && {
+    company_name: Yup.string()
+      .required("Se requiere el Nombre de la Empresa"),
+    company_rif: Yup.string()
+      .required("Se requiere el RIF de la Empresa"),
+  })
+});
+```
+
+## Procesamiento de la Orden
+
+Cuando el usuario confirma la compra:
+
+<Steps>
+  <Step title="Cálculo de Totales">
+    ```javascript
+    const subtotal = calculateSubtotal();
+    const taxes = calculateTaxes(subtotal); // IVA 16%
+    const igtf = calculateIGTF(); // IGTF 3% si hay USD
+    const total = subtotal + taxes + igtf;
+    ```
+  </Step>
+  
+  <Step title="Preparar Transacciones">
+    ```javascript
+    let transactions = await Promise.all(filteredPayments.map(async (payment) => {
+      const rawAmount = Number(paymentAmounts[payment.payment_method_id]);
+      const amountInUsd = payment.currency === 'USD' 
+        ? rawAmount 
+        : rawAmount / usdCentralBank;
+      
+      return {
+        amount: rawAmount,
+        amount_currency: payment.currency,
+        amount_exchange: amountInUsd,
+        amount_exchange_rate: payment.currency === 'USD' ? 1 : usdCentralBank,
+        date: serverTimestamp(),
+        payment_id: payment.payment_method_id,
+        payment_name: payment.name,
+        status: true,
+      };
+    }));
+    ```
+  </Step>
+  
+  <Step title="Crear Orden">
+    ```javascript
+    const finalData = {
+      amount: finalTotalAmount,
+      event_id: eventData.id,
+      event_name: eventData.event.name,
+      office_id: officeData.id,
+      tickets: tickets,
+      transactions: transactions,
+      exchange_rate: usdCentralBank,
+      is_corporate: clientType === 'corporativo'
+    };
+    
+    const resp = await order_created(finalData);
+    ```
+  </Step>
+  
+  <Step title="Confirmar Asientos en Seats.io">
+    ```javascript
+    if (hasSeatsioMap && seatsioHoldToken) {
+      const seatsToBook = prepareSeatsForSeatsio(selectedSeats);
+      await book_seats_seatsio({
+        event_id: seatsioEventData.eventKey,
+        seats: seatsToBook,
+        hold_token: seatsioHoldToken
+      });
+    }
+    ```
+  </Step>
+  
+  <Step title="Enviar Confirmación por Email">
+    ```javascript
+    send_email({
+      to_email: customerEmail,
+      to_name: customerName,
+      html_send: htmlContent,
+      subject: `Confirmación de compra: ${eventData.event.name}`
+    });
+    ```
+  </Step>
+</Steps>
+
+## Resumen Visual
+
+Después del pago exitoso, el usuario ve un resumen completo:
+
+```javascript
+const orderSummaryData = {
+  ...finalData,
+  order_id: orderId,
+  subtotal: subtotalForDisplay,
+  taxes: ivaForDisplay,
+  cash_tax: igtfForDisplay,
+};
+
+navigate('/resumen-compra', { 
+  state: { orderData: orderSummaryData } 
+});
+```
+
+## Manejo de Errores
+
+<AccordionGroup>
+  <Accordion title="Asientos No Disponibles">
+    ```javascript
+    if (!lockSeats.data.valido) {
+      lockSeats.data.nodisponible.forEach((id) => {
+        toast.error(`El ticket ${id} no está disponible`);
+      });
+      // Usuario regresa al Paso 1
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Timeout de Reserva">
+    ```javascript
+    if (timeLeft === 0) {
+      setShowTimeoutDialog(true);
+      // Liberar asientos automáticamente
+      resetAndGoToStep1();
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Error en Orden">
+    ```javascript
+    if (!resp.data.valido) {
+      toast.error('Error al crear la orden');
+      setSubmitting(false);
+      // Asientos permanecen reservados hasta timeout
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Mejores Prácticas
+
+<CardGroup cols={2}>
+  <Card title="Validación en Tiempo Real" icon="shield-check">
+    Valida la suma de pagos continuamente para habilitar el botón de envío
+  </Card>
+  <Card title="Feedback Visual" icon="eye">
+    Muestra el temporizador y el total actualizado en todo momento
+  </Card>
+  <Card title="Manejo de Errores" icon="triangle-exclamation">
+    Proporciona mensajes claros cuando los asientos no están disponibles
+  </Card>
+  <Card title="Confirmación Inmediata" icon="envelope">
+    Envía el email de confirmación tan pronto como se crea la orden
+  </Card>
+</CardGroup>
+
+## Próximos Pasos
+
+<CardGroup cols={3}>
+  <Card title="Gestión de Pagos" icon="credit-card" href="/payments/overview">
+    Aprende sobre los métodos de pago y cálculos
+  </Card>
+  <Card title="Selección de Asientos" icon="chair" href="/features/seat-selection">
+    Detalles sobre sistemas manual y Seats.io
+  </Card>
+  <Card title="Confirmación por Email" icon="envelope" href="/integrations/email">
+    Personaliza las plantillas de correo
+  </Card>
+</CardGroup>

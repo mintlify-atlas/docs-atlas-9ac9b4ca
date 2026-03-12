@@ -1,0 +1,247 @@
+---
+title: 'Visión General de Autenticación'
+description: 'Sistema de autenticación de dos niveles con Firebase para TMT - Taquilla Física'
+icon: 'shield-halved'
+---
+
+## Introducción
+
+TMT - Taquilla Física implementa un sistema de autenticación robusto de dos niveles que garantiza el acceso seguro a la plataforma:
+
+1. **Autenticación de Usuario**: Valida la identidad del colaborador
+2. **Autenticación de Taquilla**: Verifica que el usuario tenga acceso a una taquilla específica
+
+Este enfoque de doble autenticación asegura que solo los colaboradores autorizados puedan acceder a las taquillas y realizar operaciones de venta.
+
+## Arquitectura del Sistema
+
+<Info>
+La aplicación utiliza **Firebase Authentication** para gestionar usuarios y **Firestore** para almacenar datos de colaboradores y taquillas.
+</Info>
+
+### Flujo de Autenticación
+
+<Steps>
+  <Step title="Validación de plataforma">
+    El sistema verifica que el usuario pertenezca a la colección `u_collaborators` antes de permitir el inicio de sesión.
+  </Step>
+  
+  <Step title="Autenticación con Firebase">
+    Se autentica al usuario con email y contraseña mediante Firebase Authentication.
+  </Step>
+  
+  <Step title="Verificación de estado">
+    Se comprueba que el usuario tenga el campo `status: true` y haya confirmado su correo electrónico.
+  </Step>
+  
+  <Step title="Actualización del último acceso">
+    Se registra la fecha y hora del último acceso en Firestore.
+  </Step>
+  
+  <Step title="Selección de taquilla">
+    El usuario selecciona una taquilla a la cual tiene acceso asignado.
+  </Step>
+  
+  <Step title="Acceso a eventos">
+    Una vez autenticado en la taquilla, el usuario puede acceder a los eventos y realizar ventas.
+  </Step>
+</Steps>
+
+## Gestión de Estado con Redux
+
+La aplicación utiliza Redux Toolkit para gestionar el estado de autenticación en dos slices:
+
+### Auth Slice (Usuario)
+
+```javascript
+const initialState = {
+  isAuthenticated: false,
+  isInitialized: false,
+  user: null,
+};
+
+const authSlice = createSlice({
+  name: "auth",
+  initialState,
+  reducers: {
+    authStateChanged(state, action) {
+      const { isAuthenticated, user } = action.payload;
+      state.isAuthenticated = isAuthenticated;
+      state.isInitialized = true;
+      state.user = user;
+    },
+  },
+});
+```
+
+**Ubicación**: `src/store/apps/auth/authSlice.js`
+
+### Office Slice (Taquilla)
+
+```javascript
+const initialState = {
+  isAuthenticated: false,
+  isInitialized: false,
+  office: null,
+};
+
+const OfficeSlice = createSlice({
+  name: "office",
+  initialState,
+  reducers: {
+    authOfficeStateChanged(state, action) {
+      const { isAuthenticated, office } = action.payload;
+      state.isAuthenticated = isAuthenticated;
+      state.isInitialized = true;
+      state.office = office;
+    },
+  },
+});
+```
+
+**Ubicación**: `src/store/apps/office/officeSlice.js`
+
+## Proceso de Inicio de Sesión
+
+El componente `LoginForm` implementa el flujo completo de autenticación:
+
+```javascript
+const onSubmit = async (values) => {
+  // 1. Validar que el usuario pertenezca a la plataforma
+  const validateUserPlatform = await validate_user_platform({
+    platform: "u_collaborators",
+    email: values.email,
+  });
+
+  if (validateUserPlatform.data.valido) {
+    // 2. Autenticar con Firebase
+    const userCredential = await signInWithEmailAndPassword(
+      auth,
+      values.email,
+      values.password
+    );
+
+    const userUid = userCredential.user.uid;
+
+    // 3. Obtener datos del usuario desde Firestore
+    const querySnapshot = await getDoc(
+      doc(db, "u_collaborators", userUid)
+    );
+
+    // 4. Verificar estado del usuario
+    if (querySnapshot.data()?.status !== true) {
+      await signOut(auth);
+      toast.error('Usuario no autorizado, por favor confirmar su correo electrónico.');
+    } else {
+      // 5. Actualizar último acceso
+      await updateDoc(doc(db, "u_collaborators", userUid), {
+        "date.last_access": serverTimestamp(),
+      });
+
+      // 6. Actualizar estado en Redux
+      dispatch(authStateChanged({
+        isAuthenticated: true,
+        user: {
+          uid: userUid,
+          email: querySnapshot.data()?.email,
+          name: querySnapshot.data()?.name,
+          account_type: querySnapshot.data()?.account_type,
+          ...querySnapshot.data(),
+        },
+      }));
+    }
+  }
+};
+```
+
+**Ubicación**: `src/components/apps/auth/LoginForm.js:43-151`
+
+## Validación de Usuario
+
+<Warning>
+La función `validate_user_platform` verifica que el usuario exista en la colección `u_collaborators` antes de permitir el inicio de sesión. Esto previene que usuarios no autorizados accedan a la plataforma.
+</Warning>
+
+### Estructura de Datos del Usuario
+
+Cuando un usuario inicia sesión exitosamente, se almacena la siguiente información en Redux:
+
+```javascript
+{
+  uid: "firebase_user_uid",
+  email: "usuario@ejemplo.com",
+  name: "Nombre del Usuario",
+  account_type: "tipo_de_cuenta",
+  avatar: "url_de_la_imagen" || null,
+  phone: "número_telefónico",
+  address: {
+    line: "dirección",
+    zipcode: "código_postal",
+    city: "ciudad",
+    country: "país"
+  },
+  status: true,
+  date: {
+    last_access: "timestamp",
+    last_update: "timestamp",
+    create: "timestamp"
+  }
+}
+```
+
+## Manejo de Errores
+
+El sistema proporciona mensajes de error específicos para diferentes escenarios:
+
+| Código de Error | Mensaje |
+|----------------|----------|
+| `auth/invalid-email` | La dirección de correo electrónico no es válida |
+| `auth/invalid-login-credentials` | La contraseña es incorrecta |
+| `auth/invalid-credential` | La contraseña o el correo es incorrecto |
+| `auth/too-many-requests` | Has hecho muchas solicitudes, por favor espera un momento |
+
+**Ubicación**: `src/components/apps/auth/LoginForm.js:156-169`
+
+## Cierre de Sesión
+
+Para cerrar sesión, el sistema ejecuta:
+
+```javascript
+await signOut(auth);
+
+dispatch(authStateChanged({
+  isAuthenticated: false,
+  user: null,
+}));
+
+dispatch(authOfficeStateChanged({
+  isAuthenticated: false,
+  office: null,
+}));
+```
+
+Esto limpia tanto la autenticación de Firebase como el estado de Redux para usuario y taquilla.
+
+## Seguridad
+
+<Note>
+**Mejores prácticas implementadas:**
+- Validación de email con Yup
+- Contraseñas mínimas de 6 caracteres
+- Verificación de estado del usuario
+- Confirmación de correo electrónico requerida
+- Registro de último acceso
+- Manejo seguro de errores sin exponer información sensible
+</Note>
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Guards de Protección" icon="shield-check" href="/auth/guards">
+    Aprende cómo los guards protegen las rutas de la aplicación
+  </Card>
+  
+  <Card title="Control de Permisos" icon="key" href="/auth/permissions">
+    Descubre cómo funciona el sistema de permisos por taquilla
+  </Card>
+</CardGroup>

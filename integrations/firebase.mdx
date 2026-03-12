@@ -1,0 +1,342 @@
+---
+title: 'Integración con Firebase'
+description: 'Configuración y uso de Firebase como backend de TMT - Taquilla Física'
+icon: 'fire'
+---
+
+## Descripción General
+
+TMT - Taquilla Física utiliza Firebase como plataforma de backend integral, proporcionando autenticación, base de datos en tiempo real, almacenamiento de archivos y funciones serverless (Cloud Functions).
+
+<Note>
+Firebase proporciona una infraestructura escalable y en tiempo real para gestionar eventos, ventas de tickets, transacciones y autenticación de usuarios.
+</Note>
+
+## Servicios de Firebase Utilizados
+
+La aplicación integra los siguientes servicios de Firebase:
+
+- **Authentication**: Gestión de usuarios y autenticación
+- **Firestore**: Base de datos NoSQL en tiempo real
+- **Storage**: Almacenamiento de archivos e imágenes
+- **Cloud Functions**: Funciones serverless para lógica de negocio
+
+## Configuración Inicial
+
+<Steps>
+  <Step title="Crear Proyecto en Firebase">
+    1. Accede a [Firebase Console](https://console.firebase.google.com/)
+    2. Crea un nuevo proyecto
+    3. Habilita los servicios necesarios (Authentication, Firestore, Storage, Functions)
+  </Step>
+
+  <Step title="Obtener Credenciales">
+    En la configuración del proyecto, obtén las credenciales de configuración:
+    - API Key
+    - Auth Domain
+    - Project ID
+    - Storage Bucket
+    - Messaging Sender ID
+    - App ID
+  </Step>
+
+  <Step title="Configurar Variables de Entorno">
+    Crea un archivo `.env` en la raíz del proyecto con las credenciales:
+
+    ```bash .env
+    VITE_FIREBASE_API_KEY=tu-api-key
+    VITE_FIREBASE_AUTH_DOMAIN=tu-proyecto.firebaseapp.com
+    VITE_FIREBASE_PROJECT_ID=tu-proyecto-id
+    VITE_FIREBASE_STORAGE_BUCKET=tu-proyecto.appspot.com
+    VITE_FIREBASE_MESSAGING_SENDER_ID=tu-sender-id
+    VITE_FIREBASE_APP_ID=tu-app-id
+    ```
+  </Step>
+</Steps>
+
+## Inicialización de Firebase
+
+El archivo principal de configuración se encuentra en `src/guards/firebase/firebase.js`:
+
+<CodeGroup>
+```javascript firebase.js
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage";
+import { initializeFirestore } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+
+const firebaseConfig = {
+  apiKey: "-",
+  authDomain: "-",
+  projectId: "-",
+  storageBucket: "-",
+  messagingSenderId: "-",
+  appId: "-",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const storage = getStorage(app);
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+});
+const functions = getFunctions(app);
+
+export {
+  auth,
+  db,
+  storage,
+  app,
+  functions
+};
+```
+</CodeGroup>
+
+<Warning>
+Asegúrate de reemplazar los valores de configuración con tus credenciales reales de Firebase. Nunca compartas estas credenciales públicamente.
+</Warning>
+
+## Cloud Functions
+
+La aplicación utiliza múltiples Cloud Functions para operaciones críticas:
+
+### Funciones Disponibles
+
+<CodeGroup>
+```javascript Declaración de Functions
+const validate_user_platform = httpsCallable(functions, "validate_user_platform");
+const office_validate = httpsCallable(functions, "office_validate");
+const tickets_list_event_sales = httpsCallable(functions, "tickets_list_event_sales");
+const order_created = httpsCallable(functions, "order_created");
+const tickets_lock = httpsCallable(functions, "tickets_lock");
+const tickets_unlock_param = httpsCallable(functions, "tickets_unlock_param");
+const send_email = httpsCallable(functions, "send_email");
+const validate_user_email = httpsCallable(functions, "validate_user_email");
+const hold_seats_seatsio = httpsCallable(functions, "hold_seats_seatsio");
+const release_seats_seatsio = httpsCallable(functions, "release_seats_seatsio");
+const expire_hold_token_seatsio = httpsCallable(functions, "expire_hold_token_seatsio");
+const book_seats_seatsio = httpsCallable(functions, "book_seats_seatsio");
+```
+</CodeGroup>
+
+### Uso de Cloud Functions
+
+#### Obtener Lista de Tickets
+
+```javascript
+import { tickets_list_event_sales } from '../../guards/firebase/firebase';
+
+const getTickets = await tickets_list_event_sales({ 
+  event_id: eventData?.id 
+});
+
+if (getTickets?.data?.response) {
+  const ticketsMap = {};
+  zones.forEach(zone => {
+    const zoneTickets = getTickets.data.response.filter(
+      ticket => ticket.zone === zone.name && 
+               ticket.status === true && 
+               ticket.status_offline !== true
+    );
+    ticketsMap[zone.name] = {
+      tickets: zoneTickets,
+      price: zone.price,
+      usedTickets: []
+    };
+  });
+}
+```
+
+#### Crear Orden
+
+```javascript
+import { order_created } from '../../guards/firebase/firebase';
+
+const orderData = {
+  event_id: eventData.id,
+  customer_data: {
+    name: values.customer_name,
+    email: values.customer_email,
+    phone: values.customer_phone
+  },
+  tickets: selectedSeats,
+  total_amount: finalAmount
+};
+
+const response = await order_created(orderData);
+if (response.data.success) {
+  console.log('Orden creada:', response.data.order);
+}
+```
+
+#### Enviar Email
+
+```javascript
+import { send_email } from '../../guards/firebase/firebase';
+
+send_email({
+  to_email: customerEmail,
+  to_name: customerName,
+  html_send: htmlContent,
+  subject: subject
+}).then(() => {
+  toast.info('Correo de confirmación enviado.');
+}).catch((error) => {
+  console.error('Error al enviar el correo:', error);
+  toast.error('No se pudo enviar el correo de confirmación.');
+});
+```
+
+## Firestore Database
+
+### Estructura de Datos
+
+La base de datos Firestore está organizada en las siguientes colecciones principales:
+
+- **events**: Información de eventos
+- **events/{eventId}/setup**: Configuración de zonas y precios
+- **orders**: Órdenes de compra
+- **tickets**: Tickets vendidos
+- **offices**: Taquillas físicas
+
+### Ejemplo de Lectura de Datos
+
+<CodeGroup>
+```javascript Leer Evento
+import { getDoc, doc } from 'firebase/firestore';
+import { db } from '../../guards/firebase/firebase';
+
+const eventDoc = await getDoc(doc(db, 'events', eventId));
+if (eventDoc.exists()) {
+  const eventData = eventDoc.data();
+  console.log('Evento:', eventData);
+}
+```
+
+```javascript Leer Zonas del Evento
+const zonesDoc = await getDoc(
+  doc(db, `/events/${eventId}/setup`, 'zones')
+);
+
+if (zonesDoc.exists()) {
+  const zonesData = zonesDoc.data();
+  const zones = zonesData.zone || [];
+  console.log('Zonas disponibles:', zones);
+}
+```
+</CodeGroup>
+
+## Configuración de Hosting
+
+El archivo `firebase.json` configura el hosting de Firebase:
+
+```json firebase.json
+{
+  "hosting": {
+    "target": "tu-target-name",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
+```
+
+<Tip>
+Las rewrites configuradas permiten que la aplicación React Router funcione correctamente con rutas del lado del cliente.
+</Tip>
+
+## Despliegue
+
+<Steps>
+  <Step title="Instalar Firebase CLI">
+    ```bash
+    npm install -g firebase-tools
+    ```
+  </Step>
+
+  <Step title="Iniciar Sesión">
+    ```bash
+    firebase login
+    ```
+  </Step>
+
+  <Step title="Construir la Aplicación">
+    ```bash
+    npm run build
+    ```
+  </Step>
+
+  <Step title="Desplegar">
+    ```bash
+    firebase deploy
+    ```
+  </Step>
+</Steps>
+
+## Seguridad y Mejores Prácticas
+
+<Warning>
+**Importante**: Implementa las siguientes prácticas de seguridad:
+
+- Configura reglas de seguridad en Firestore
+- Utiliza autenticación para operaciones sensibles
+- No expongas credenciales en el código fuente
+- Implementa validación en Cloud Functions
+- Utiliza HTTPS para todas las comunicaciones
+</Warning>
+
+### Reglas de Seguridad de Firestore
+
+Ejemplo de reglas básicas:
+
+```javascript firestore.rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /orders/{orderId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+  }
+}
+```
+
+## Solución de Problemas
+
+### Error: Long Polling Requerido
+
+Si experimentas problemas de conexión, el proyecto ya está configurado con `experimentalForceLongPolling`:
+
+```javascript
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+});
+```
+
+### Error: Permisos Denegados
+
+Verifica que:
+1. Las reglas de seguridad estén configuradas correctamente
+2. El usuario esté autenticado para operaciones que lo requieren
+3. Las Cloud Functions tengan los permisos necesarios
+
+## Recursos Adicionales
+
+- [Documentación de Firebase](https://firebase.google.com/docs)
+- [Firestore Best Practices](https://firebase.google.com/docs/firestore/best-practices)
+- [Cloud Functions Guide](https://firebase.google.com/docs/functions)

@@ -1,0 +1,502 @@
+---
+title: 'Control de Permisos'
+description: 'Sistema de permisos y control de acceso por taquilla en TMT'
+icon: 'key'
+---
+
+## Sistema de Permisos
+
+TMT implementa un sistema de permisos basado en dos niveles de autorización que determina qué acciones puede realizar un usuario dentro de la aplicación:
+
+1. **Nivel de Usuario**: Determina si el colaborador puede acceder a la plataforma
+2. **Nivel de Taquilla**: Determina qué taquillas puede operar el colaborador
+
+Este sistema asegura que cada colaborador solo tenga acceso a las taquillas y eventos que le han sido asignados.
+
+## Arquitectura de Permisos
+
+<Info>
+El sistema de permisos se gestiona a través de la colección `u_collaborators` en Firestore, que almacena la información de cada colaborador y sus taquillas asignadas.
+</Info>
+
+### Estructura de Datos del Colaborador
+
+```javascript
+{
+  uid: "firebase_user_uid",
+  email: "colaborador@tmt.com",
+  name: "Nombre del Colaborador",
+  account_type: "admin" | "operator" | "supervisor",
+  status: true,  // Activo o inactivo
+  offices: [      // Taquillas asignadas
+    "office_id_1",
+    "office_id_2",
+    "office_id_3"
+  ],
+  date: {
+    create: "timestamp",
+    last_update: "timestamp",
+    last_access: "timestamp"
+  }
+}
+```
+
+## Tipos de Cuentas
+
+TMT define diferentes tipos de cuentas con distintos niveles de acceso:
+
+<CardGroup cols={3}>
+  <Card title="Admin" icon="crown">
+    Acceso completo a todas las funcionalidades y taquillas del sistema
+  </Card>
+  
+  <Card title="Supervisor" icon="user-tie">
+    Puede supervisar y gestionar múltiples taquillas asignadas
+  </Card>
+  
+  <Card title="Operator" icon="user">
+    Puede operar las taquillas específicamente asignadas
+  </Card>
+</CardGroup>
+
+### Permisos por Tipo de Cuenta
+
+| Permiso | Admin | Supervisor | Operator |
+|---------|-------|------------|----------|
+| Ver todas las taquillas | ✅ | ⚠️ Solo asignadas | ⚠️ Solo asignadas |
+| Seleccionar taquilla | ✅ | ✅ | ✅ |
+| Ver eventos | ✅ | ✅ | ✅ |
+| Realizar ventas | ✅ | ✅ | ✅ |
+| Generar cortesías | ✅ | ✅ | ❌ |
+| Gestionar configuración | ✅ | ❌ | ❌ |
+
+## Flujo de Autorización
+
+<Steps>
+  <Step title="Validación de plataforma">
+    La función `validate_user_platform` verifica que el email exista en la colección `u_collaborators`.
+    
+    ```javascript
+    const validateUserPlatform = await validate_user_platform({
+      platform: "u_collaborators",
+      email: values.email,
+    });
+    
+    if (!validateUserPlatform.data.valido) {
+      toast.error("Usuario no autorizado.");
+      return;
+    }
+    ```
+    
+    **Ubicación**: `src/components/apps/auth/LoginForm.js:47-50`
+  </Step>
+  
+  <Step title="Verificación de estado">
+    Después de la autenticación, se verifica que el campo `status` sea `true`.
+    
+    ```javascript
+    const querySnapshot = await getDoc(
+      doc(db, "u_collaborators", userUid)
+    );
+    
+    if (querySnapshot.data()?.status !== true) {
+      await signOut(auth);
+      toast.error('Usuario no autorizado, por favor confirmar su correo electrónico.');
+      return;
+    }
+    ```
+    
+    **Ubicación**: `src/components/apps/auth/LoginForm.js:62-88`
+  </Step>
+  
+  <Step title="Carga de datos del usuario">
+    Se cargan todos los datos del usuario incluyendo `account_type` y `offices`.
+    
+    ```javascript
+    dispatch(authStateChanged({
+      isAuthenticated: true,
+      user: {
+        uid: userUid,
+        email: querySnapshot.data()?.email,
+        name: querySnapshot.data()?.name,
+        account_type: querySnapshot.data()?.account_type,
+        offices: querySnapshot.data()?.offices || [],
+        ...querySnapshot.data(),
+      },
+    }));
+    ```
+    
+    **Ubicación**: `src/components/apps/auth/LoginForm.js:96-115`
+  </Step>
+  
+  <Step title="Filtrado de taquillas">
+    En la vista de taquillas, se filtran solo las que el usuario tiene permiso para acceder.
+  </Step>
+  
+  <Step title="Autenticación de taquilla">
+    Al seleccionar una taquilla, se actualiza el estado de Redux:
+    
+    ```javascript
+    dispatch(authOfficeStateChanged({
+      isAuthenticated: true,
+      office: selectedOffice,
+    }));
+    ```
+  </Step>
+  
+  <Step title="Acceso a funcionalidades">
+    Con la taquilla autenticada, el `OfficeGuard` permite acceso a eventos y ventas.
+  </Step>
+</Steps>
+
+## Validación de Acceso a Taquillas
+
+### Verificar si el usuario tiene acceso
+
+```javascript
+import { useSelector } from 'react-redux';
+
+const OfficesList = () => {
+  const user = useSelector((state) => state.auth.user);
+  const allOffices = useSelector((state) => state.offices.offices);
+  
+  // Filtrar taquillas según permisos
+  const userOffices = allOffices.filter(office => {
+    // Si es admin, puede ver todas
+    if (user.account_type === 'admin') {
+      return true;
+    }
+    
+    // Si no, solo las asignadas
+    return user.offices?.includes(office.id);
+  });
+  
+  return (
+    <div>
+      {userOffices.map(office => (
+        <OfficeCard key={office.id} office={office} />
+      ))}
+    </div>
+  );
+};
+```
+
+### Validar permiso específico
+
+```javascript
+const hasPermission = (user, permission) => {
+  const permissions = {
+    admin: ['all'],
+    supervisor: ['view_events', 'sell_tickets', 'create_courtesy'],
+    operator: ['view_events', 'sell_tickets'],
+  };
+  
+  const userPermissions = permissions[user.account_type] || [];
+  
+  return userPermissions.includes('all') || userPermissions.includes(permission);
+};
+
+// Uso
+if (hasPermission(user, 'create_courtesy')) {
+  // Mostrar opción de cortesías
+}
+```
+
+## Control de Acceso en Componentes
+
+### Proteger funcionalidades por tipo de cuenta
+
+```javascript
+import { useSelector } from 'react-redux';
+
+const EventActions = () => {
+  const user = useSelector((state) => state.auth.user);
+  
+  return (
+    <div>
+      {/* Todos pueden vender */}
+      <Button label="Vender Entradas" />
+      
+      {/* Solo admin y supervisor pueden generar cortesías */}
+      {['admin', 'supervisor'].includes(user.account_type) && (
+        <Button label="Generar Cortesías" />
+      )}
+      
+      {/* Solo admin puede acceder a configuración */}
+      {user.account_type === 'admin' && (
+        <Button label="Configuración" />
+      )}
+    </div>
+  );
+};
+```
+
+### Hook personalizado para permisos
+
+```javascript
+import { useSelector } from 'react-redux';
+
+export const usePermissions = () => {
+  const user = useSelector((state) => state.auth.user);
+  const office = useSelector((state) => state.office.office);
+  
+  return {
+    isAdmin: user?.account_type === 'admin',
+    isSupervisor: user?.account_type === 'supervisor',
+    isOperator: user?.account_type === 'operator',
+    
+    canAccessOffice: (officeId) => {
+      if (user?.account_type === 'admin') return true;
+      return user?.offices?.includes(officeId);
+    },
+    
+    canCreateCourtesy: () => {
+      return ['admin', 'supervisor'].includes(user?.account_type);
+    },
+    
+    canManageSettings: () => {
+      return user?.account_type === 'admin';
+    },
+    
+    hasOfficeSelected: () => {
+      return office?.isAuthenticated === true;
+    },
+  };
+};
+
+// Uso en componentes
+const MyComponent = () => {
+  const { isAdmin, canCreateCourtesy, hasOfficeSelected } = usePermissions();
+  
+  return (
+    <div>
+      {hasOfficeSelected() && (
+        <>
+          <SellTicketsButton />
+          {canCreateCourtesy() && <CourtesyButton />}
+          {isAdmin && <SettingsButton />}
+        </>
+      )}
+    </div>
+  );
+};
+```
+
+## Actualización de Permisos
+
+<Warning>
+**Importante**: Los cambios en permisos (agregar/quitar taquillas, cambiar tipo de cuenta) requieren que el usuario cierre sesión y vuelva a iniciarla para que los cambios surtan efecto.
+</Warning>
+
+### Forzar recarga de permisos
+
+```javascript
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../guards/firebase/firebase';
+
+const refreshUserPermissions = async (userUid) => {
+  const userDoc = await getDoc(doc(db, "u_collaborators", userUid));
+  
+  if (userDoc.exists()) {
+    dispatch(authStateChanged({
+      isAuthenticated: true,
+      user: {
+        uid: userUid,
+        ...userDoc.data(),
+      },
+    }));
+  }
+};
+```
+
+## Seguridad y Mejores Prácticas
+
+<Note>
+**Principio de menor privilegio**: Asigna a cada usuario solo los permisos mínimos necesarios para realizar su trabajo.
+</Note>
+
+### Validación en el Backend
+
+```javascript
+// Firebase Security Rules - Ejemplo para Firestore
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Solo usuarios autenticados pueden leer colaboradores
+    match /u_collaborators/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/u_collaborators/$(request.auth.uid)).data.account_type == 'admin';
+    }
+    
+    // Validar acceso a taquillas
+    match /offices/{officeId} {
+      allow read: if request.auth != null && (
+        get(/databases/$(database)/documents/u_collaborators/$(request.auth.uid)).data.account_type == 'admin' ||
+        officeId in get(/databases/$(database)/documents/u_collaborators/$(request.auth.uid)).data.offices
+      );
+    }
+  }
+}
+```
+
+### Checklist de Seguridad
+
+- [ ] Validar permisos tanto en frontend como en backend
+- [ ] Verificar el estado del usuario (`status: true`) antes de permitir acceso
+- [ ] Comprobar que el usuario tenga la taquilla asignada antes de permitir operaciones
+- [ ] Registrar todas las acciones importantes (ventas, cortesías) con el ID del usuario
+- [ ] Implementar timeouts de sesión para mayor seguridad
+- [ ] Usar Firebase Security Rules para proteger datos en Firestore
+
+## Auditoría y Registro
+
+### Registrar acciones del usuario
+
+```javascript
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+
+const logUserAction = async (action, details) => {
+  const user = useSelector((state) => state.auth.user);
+  const office = useSelector((state) => state.office.office);
+  
+  await addDoc(collection(db, "audit_logs"), {
+    user_uid: user.uid,
+    user_email: user.email,
+    user_name: user.name,
+    account_type: user.account_type,
+    office_id: office?.id || null,
+    office_name: office?.name || null,
+    action: action,
+    details: details,
+    timestamp: serverTimestamp(),
+    ip_address: await getClientIP(),
+  });
+};
+
+// Uso
+await logUserAction('SALE_COMPLETED', {
+  event_id: eventId,
+  tickets: selectedTickets,
+  total: totalAmount,
+});
+```
+
+### Últimos accesos
+
+El sistema registra automáticamente el último acceso del usuario:
+
+```javascript
+await updateDoc(doc(db, "u_collaborators", userUid), {
+  "date.last_access": serverTimestamp(),
+});
+```
+
+**Ubicación**: `src/components/apps/auth/LoginForm.js:90-92`
+
+## Debugging de Permisos
+
+### Verificar permisos del usuario actual
+
+```javascript
+import { useSelector } from 'react-redux';
+
+const DebugPermissions = () => {
+  const user = useSelector((state) => state.auth.user);
+  const office = useSelector((state) => state.office.office);
+  
+  console.group('🔐 User Permissions');
+  console.log('User ID:', user?.uid);
+  console.log('Account Type:', user?.account_type);
+  console.log('Assigned Offices:', user?.offices);
+  console.log('Current Office:', office?.id);
+  console.log('Is Authenticated:', user !== null);
+  console.log('Office Authenticated:', office !== null);
+  console.groupEnd();
+  
+  return null; // Componente solo para debugging
+};
+```
+
+### Redux DevTools
+
+Utiliza Redux DevTools para inspeccionar el estado completo:
+
+```javascript
+// Estado de auth
+state.auth = {
+  isAuthenticated: true,
+  isInitialized: true,
+  user: {
+    uid: "...",
+    account_type: "operator",
+    offices: ["office_1", "office_2"],
+    // ...
+  }
+}
+
+// Estado de office
+state.office = {
+  isAuthenticated: true,
+  isInitialized: true,
+  office: {
+    id: "office_1",
+    name: "Taquilla Principal",
+    // ...
+  }
+}
+```
+
+## Gestión de Errores de Permisos
+
+### Manejar acceso denegado
+
+```javascript
+const handleUnauthorizedAccess = () => {
+  toast.error('No tienes permisos para realizar esta acción', {
+    position: "bottom-center",
+    autoClose: 5000,
+    theme: "light",
+  });
+  
+  // Registrar intento de acceso no autorizado
+  logUserAction('UNAUTHORIZED_ACCESS_ATTEMPT', {
+    attempted_action: 'create_courtesy',
+    current_permissions: user.account_type,
+  });
+};
+```
+
+### Mostrar mensajes informativos
+
+```javascript
+const RestrictedFeature = () => {
+  const { canCreateCourtesy } = usePermissions();
+  
+  if (!canCreateCourtesy()) {
+    return (
+      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
+        <p className="text-sm text-yellow-800">
+          Esta funcionalidad requiere permisos de supervisor o administrador.
+          Contacta a tu supervisor si necesitas acceso.
+        </p>
+      </div>
+    );
+  }
+  
+  return <CourtesyTicketsComponent />;
+};
+```
+
+## Próximos Pasos
+
+<CardGroup cols={2}>
+  <Card title="Visión General" icon="shield-halved" href="/auth/overview">
+    Vuelve a la visión general del sistema de autenticación
+  </Card>
+  
+  <Card title="Guards de Protección" icon="shield-check" href="/auth/guards">
+    Aprende cómo los guards protegen las rutas
+  </Card>
+</CardGroup>

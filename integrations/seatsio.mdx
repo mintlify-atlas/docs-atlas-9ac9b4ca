@@ -1,0 +1,496 @@
+---
+title: 'Integración con Seats.io'
+description: 'Implementación del sistema de mapas interactivos de asientos con Seats.io'
+icon: 'chair'
+---
+
+## Descripción General
+
+Seats.io proporciona un sistema avanzado de gestión de asientos con mapas interactivos, permitiendo a los usuarios seleccionar asientos visualmente en un plano del venue. TMT integra Seats.io para eventos que requieren selección específica de asientos.
+
+<Note>
+La integración de Seats.io es opcional y se activa por evento. Los eventos sin mapa de Seats.io utilizan el sistema manual de selección.
+</Note>
+
+## Características
+
+- Mapas interactivos de asientos en tiempo real
+- Reserva temporal de asientos (hold tokens)
+- Integración con sistema de pricing por zonas
+- Soporte para asientos individuales y admisión general
+- Sesiones con expiración automática
+
+## Instalación
+
+La librería de Seats.io ya está incluida en las dependencias del proyecto:
+
+```json package.json
+{
+  "dependencies": {
+    "@seatsio/seatsio-react": "^15.20.0"
+  }
+}
+```
+
+```bash
+npm install @seatsio/seatsio-react
+```
+
+## Configuración
+
+<Steps>
+  <Step title="Crear Cuenta en Seats.io">
+    1. Regístrate en [Seats.io](https://www.seats.io/)
+    2. Crea un workspace
+    3. Obtén tu clave pública (Public Key)
+  </Step>
+
+  <Step title="Configurar Variables de Entorno">
+    Añade las siguientes variables a tu archivo `.env`:
+
+    ```bash .env
+    VITE_SEATSIO_PUBLIC_KEY=tu-public-key
+    VITE_SEATSIO_REGION=eu  # o 'na' para Norteamérica
+    ```
+  </Step>
+
+  <Step title="Crear Eventos en Seats.io">
+    En el dashboard de Seats.io:
+    1. Crea un chart (mapa del venue)
+    2. Define categorías y zonas
+    3. Crea un evento asociado al chart
+    4. Guarda el `chartKey` y `eventKey`
+  </Step>
+</Steps>
+
+## Estructura de Datos en Firestore
+
+Para habilitar Seats.io en un evento, la estructura en Firestore debe incluir:
+
+```javascript
+{
+  "events/{eventId}": {
+    "name": "Nombre del Evento",
+    "venue_name": "Nombre del Venue",
+    "seatsio_event": {
+      "chartKey": "chart-key-desde-seatsio",
+      "eventKey": "event-key-desde-seatsio",
+      "categories": [
+        {
+          "key": "1",
+          "label": "VIP",
+          "color": "#FFD700"
+        },
+        {
+          "key": "2",
+          "label": "Platea",
+          "color": "#4169E1"
+        }
+      ]
+    }
+  }
+}
+```
+
+## Implementación del Componente
+
+### Importación
+
+<CodeGroup>
+```javascript Import
+import { SeatsioSeatingChart } from '@seatsio/seatsio-react';
+import { 
+  hold_seats_seatsio, 
+  release_seats_seatsio, 
+  book_seats_seatsio 
+} from '../../guards/firebase/firebase';
+```
+</CodeGroup>
+
+### Detección de Mapa Seats.io
+
+El sistema verifica si un evento tiene configurado Seats.io:
+
+```javascript CheckOut.js
+// Verificar si el evento tiene mapa de Seats.io
+let eventHasSeatsioMap = false;
+try {
+  const eventDoc = await getDoc(doc(db, 'events', eventId));
+  if (eventDoc.exists()) {
+    const eventDataFromDb = eventDoc.data();
+    if (eventDataFromDb.seatsio_event && eventDataFromDb.seatsio_event.chartKey) {
+      console.log('🗺️ Evento con mapa de Seats.io detectado');
+      setSeatsioEventData(eventDataFromDb.seatsio_event);
+      setHasSeatsioMap(true);
+      eventHasSeatsioMap = true;
+
+      // Cargar zonas para obtener precios
+      const zonesDoc = await getDoc(doc(db, `/events/${eventId}/setup`, 'zones'));
+      if (zonesDoc.exists()) {
+        const zonesData = zonesDoc.data();
+        const zones = zonesData.zone || [];
+        const categories = eventDataFromDb.seatsio_event.categories || [];
+
+        // Construir objeto pricing para Seats.io
+        const prices = [];
+        categories.forEach(category => {
+          const matchingZone = zones.find(zone => zone.name === category.label);
+          if (matchingZone && matchingZone.price) {
+            prices.push({
+              category: String(category.key),
+              price: matchingZone.price
+            });
+          }
+        });
+
+        const pricingObject = {
+          prices,
+          priceFormatter: (price) => `$${price.toFixed(2)}`
+        };
+        setSeatsioPricing(pricingObject);
+      }
+    }
+  }
+} catch (error) {
+  console.error('Error al cargar datos de Seats.io:', error);
+  setHasSeatsioMap(false);
+}
+```
+
+### Renderizado del Componente
+
+<CodeGroup>
+```jsx Componente SeatsioSeatingChart
+<SeatsioSeatingChart
+  workspaceKey={import.meta.env.VITE_SEATSIO_PUBLIC_KEY}
+  event={seatsioEventData.eventKey}
+  region={import.meta.env.VITE_SEATSIO_REGION}
+  language='es'
+  pricing={seatsioPricing}
+  session='start'
+  onSessionInitialized={(holdToken) => {
+    console.log('🔒 Sesión de Seats.io iniciada:', holdToken);
+    setSeatsioHoldToken(holdToken);
+    toast.info('Sesión iniciada. Los asientos se reservarán por 15 minutos.', {
+      position: "bottom-center",
+      autoClose: 4000,
+    });
+  }}
+  onChartRendered={() => {
+    console.log('✅ Mapa cargado correctamente');
+    dispatch(setLoadingData({ loading: false }));
+  }}
+  onChartRenderingFailed={(error) => {
+    console.error('❌ Error al cargar mapa:', error);
+    dispatch(setLoadingData({ loading: false }));
+    toast.error('Error al cargar el mapa. Por favor, recarga la página.');
+  }}
+  onObjectSelected={handleSeatsioSeatSelected}
+  onObjectDeselected={handleSeatsioSeatDeselected}
+/>
+```
+</CodeGroup>
+
+<Tip>
+El parámetro `session='start'` inicia automáticamente una sesión con hold token, reservando los asientos seleccionados temporalmente.
+</Tip>
+
+## Manejo de Eventos
+
+### Selección de Asientos
+
+Cuando un usuario selecciona un asiento, se ejecuta el handler `handleSeatsioSeatSelected`:
+
+```javascript
+const handleSeatsioSeatSelected = (object) => {
+  console.log('🎯 ASIENTO SELECCIONADO EN SEATS.IO:', object);
+  
+  const category = seatsioEventData.categories.find(
+    c => String(c.key) === String(object.category?.key || object.category)
+  );
+  
+  if (!category) {
+    console.warn('⚠️ No se encontró categoría para el asiento:', object);
+    return;
+  }
+
+  const categoryLabel = category.label;
+  const categoryKey = String(category.key);
+  const objectType = (object.objectType || '').toLowerCase();
+  const isGeneralAdmission = objectType === 'generaladmissionarea';
+  const quantity = isGeneralAdmission && object.numSelected ? object.numSelected : 1;
+
+  setSelectedSeats(prevSelectedSeats => {
+    // Verificar tickets disponibles
+    if (!seatsioTicketsMap[categoryLabel] || 
+        seatsioTicketsMap[categoryLabel].tickets.length === 0) {
+      toast.error(`No hay tickets disponibles para ${categoryLabel}`, {
+        position: "bottom-center",
+        autoClose: 3000,
+      });
+      return prevSelectedSeats;
+    }
+
+    // Buscar ticket disponible
+    const ticketForSeat = seatsioTicketsMap[categoryLabel].tickets.find(
+      ticket => !seatsioTicketsMap[categoryLabel].usedTickets.includes(ticket.ticket_id) &&
+               !prevSelectedSeats.find(s => s.ticket_id === ticket.ticket_id)
+    );
+
+    if (!ticketForSeat) {
+      toast.error(`No hay más tickets disponibles en ${categoryLabel}`);
+      return prevSelectedSeats;
+    }
+
+    // Crear nuevo asiento seleccionado
+    const newSeat = {
+      id: object.label || object.id || `${categoryLabel}-${object.uuid}`,
+      seatsio_uuid: object.uuid || object.id,
+      seatsio_object: { ...object, quantity: 1 },
+      seatsio_category: categoryKey,
+      ticket_id: ticketForSeat.ticket_id,
+      price: seatsioTicketsMap[categoryLabel].price,
+      corporate_price: ticketForSeat.corporate_price,
+      status: 'available',
+      location: categoryLabel,
+      name: categoryLabel,
+      metadata: 'Seats.io',
+      zone: ticketForSeat.zone || categoryLabel,
+      event_id: ticketForSeat.event_id || eventData?.id,
+      ticket_data: ticketForSeat
+    };
+
+    // Marcar ticket como usado
+    setSeatsioTicketsMap(prev => ({
+      ...prev,
+      [categoryLabel]: {
+        ...prev[categoryLabel],
+        usedTickets: [...prev[categoryLabel].usedTickets, ticketForSeat.ticket_id]
+      }
+    }));
+
+    return [...prevSelectedSeats, newSeat];
+  });
+};
+```
+
+### Deselección de Asientos
+
+```javascript
+const handleSeatsioSeatDeselected = (object) => {
+  console.log('❌ ASIENTO DESELECCIONADO EN SEATS.IO:', object);
+  
+  const objectType = (object.objectType || '').toLowerCase();
+  const isGeneralAdmission = objectType === 'generaladmissionarea';
+  const objectUuid = object.uuid || object.id;
+
+  setSelectedSeats(prevSelectedSeats => {
+    const seatsToRemove = prevSelectedSeats.filter(seat =>
+      seat.metadata === 'Seats.io' && seat.seatsio_uuid === objectUuid
+    );
+
+    if (seatsToRemove.length === 0) {
+      return prevSelectedSeats;
+    }
+
+    // Liberar tickets
+    seatsToRemove.forEach(seat => {
+      const categoryLabel = seat.location;
+      setSeatsioTicketsMap(prev => ({
+        ...prev,
+        [categoryLabel]: {
+          ...prev[categoryLabel],
+          usedTickets: prev[categoryLabel].usedTickets.filter(
+            id => id !== seat.ticket_id
+          )
+        }
+      }));
+    });
+
+    return prevSelectedSeats.filter(seat =>
+      !(seat.metadata === 'Seats.io' && seat.seatsio_uuid === objectUuid)
+    );
+  });
+};
+```
+
+## Integración con Pricing
+
+El sistema mapea automáticamente las categorías de Seats.io con los precios configurados en Firestore:
+
+```javascript
+const prices = [];
+categories.forEach(category => {
+  const matchingZone = zones.find(zone => zone.name === category.label);
+  if (matchingZone && matchingZone.price) {
+    prices.push({
+      category: String(category.key),
+      price: matchingZone.price
+    });
+  }
+});
+
+const pricingObject = {
+  prices,
+  priceFormatter: (price) => `$${price.toFixed(2)}`
+};
+```
+
+## Cloud Functions para Seats.io
+
+La aplicación utiliza Cloud Functions para gestionar las reservas:
+
+<CodeGroup>
+```javascript Hold Seats
+import { hold_seats_seatsio } from '../../guards/firebase/firebase';
+
+const result = await hold_seats_seatsio({
+  eventKey: seatsioEventData.eventKey,
+  objects: selectedSeats.map(s => s.seatsio_uuid),
+  holdToken: seatsioHoldToken
+});
+```
+
+```javascript Release Seats
+import { release_seats_seatsio } from '../../guards/firebase/firebase';
+
+const result = await release_seats_seatsio({
+  eventKey: seatsioEventData.eventKey,
+  objects: seatsToRelease.map(s => s.seatsio_uuid),
+  holdToken: seatsioHoldToken
+});
+```
+
+```javascript Book Seats
+import { book_seats_seatsio } from '../../guards/firebase/firebase';
+
+const result = await book_seats_seatsio({
+  eventKey: seatsioEventData.eventKey,
+  objects: selectedSeats.map(s => s.seatsio_uuid),
+  holdToken: seatsioHoldToken
+});
+```
+</CodeGroup>
+
+## Hold Tokens y Sesiones
+
+<Warning>
+**Importante**: Los hold tokens tienen una duración limitada (generalmente 15 minutos). Asegúrate de gestionar correctamente las expiraciones.
+</Warning>
+
+### Manejo de Sesión
+
+```javascript
+// La sesión se inicia automáticamente
+onSessionInitialized={(holdToken) => {
+  console.log('🔒 Sesión iniciada:', holdToken);
+  setSeatsioHoldToken(holdToken);
+  
+  // Mostrar notificación al usuario
+  toast.info('Sesión iniciada. Los asientos se reservarán por 15 minutos.');
+}}
+```
+
+### Expiración de Hold Token
+
+```javascript
+import { expire_hold_token_seatsio } from '../../guards/firebase/firebase';
+
+// Expirar manualmente un hold token
+const result = await expire_hold_token_seatsio({
+  eventKey: seatsioEventData.eventKey,
+  holdToken: seatsioHoldToken
+});
+```
+
+## Admisión General vs Asientos Específicos
+
+Seats.io soporta dos tipos de objetos:
+
+### Asientos Específicos
+```javascript
+const isSpecificSeat = objectType === 'seat';
+// Se muestra el número/label del asiento
+// Cada selección = 1 ticket
+```
+
+### Admisión General
+```javascript
+const isGeneralAdmission = objectType === 'generaladmissionarea';
+// El usuario puede seleccionar múltiples espacios
+// object.numSelected indica la cantidad
+```
+
+## Indicador Visual de Sesión
+
+Muestra al usuario cuando tiene una sesión activa:
+
+```jsx
+{seatsioHoldToken && (
+  <div className="mt-4 p-3 border border-green-500/20 rounded-md bg-green-500/5">
+    <p className="text-sm text-green-700 flex items-center gap-2">
+      <span>🔒</span>
+      <span className="font-medium">Sesión activa:</span>
+      <span>Los asientos se reservarán automáticamente por 15 minutos</span>
+    </p>
+  </div>
+)}
+```
+
+## Personalización
+
+### Idioma
+```jsx
+language='es'  // Español
+```
+
+### Región
+```jsx
+region='eu'  // Europa
+region='na'  // Norteamérica
+```
+
+### Altura del Mapa
+```jsx
+<div style={{ height: '600px', position: 'relative' }}>
+  <SeatsioSeatingChart ... />
+</div>
+```
+
+## Solución de Problemas
+
+### El mapa no se carga
+
+<Steps>
+  <Step title="Verificar Public Key">
+    Confirma que `VITE_SEATSIO_PUBLIC_KEY` esté correctamente configurada
+  </Step>
+  
+  <Step title="Verificar Event Key">
+    Asegúrate de que el `eventKey` en Firestore sea válido
+  </Step>
+  
+  <Step title="Verificar Región">
+    La región debe coincidir con tu workspace de Seats.io
+  </Step>
+</Steps>
+
+### Los asientos no se reservan
+
+Verifica que:
+1. El hold token se esté generando correctamente
+2. Las Cloud Functions estén desplegadas
+3. Los permisos de Firebase estén configurados
+
+### Error de categorías
+
+Asegúrate de que:
+1. Las categorías en Seats.io coincidan con las zonas en Firestore
+2. Los `category.key` sean strings
+3. Cada categoría tenga un precio asignado
+
+## Recursos Adicionales
+
+- [Documentación de Seats.io](https://docs.seats.io/)
+- [React Component Guide](https://docs.seats.io/docs/renderer-react)
+- [API Reference](https://docs.seats.io/docs/api-overview)

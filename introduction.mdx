@@ -1,0 +1,120 @@
+---
+title: "Bienvenido a TMT - Taquilla Física"
+description: "Sistema completo de taquilla física para venta de entradas de eventos con gestión de pagos, asientos y clientes corporativos"
+---
+
+<img
+  className="block"
+  src="/images/hero-light.svg"
+  alt="TMT Hero Light"
+/>
+
+## Qué es TMT - Taquilla Física
+
+TMT es un sistema de punto de venta especializado para taquillas físicas de eventos. Permite a los operadores de taquilla vender entradas de manera eficiente, gestionar múltiples métodos de pago, y ofrecer una experiencia fluida tanto para eventos con asientos numerados como con selección libre.
+
+## Características Principales
+
+<CardGroup cols={2}>
+  <Card title="Gestión de Eventos" icon="calendar-days" href="/features/events">
+    Administra eventos con información detallada, imágenes y configuración de zonas
+  </Card>
+  <Card title="Proceso de Checkout" icon="cart-shopping" href="/features/checkout">
+    Flujo de compra optimizado con selección de asientos y gestión de pagos
+  </Card>
+  <Card title="Selección de Asientos" icon="chair" href="/features/seat-selection">
+    Integración con Seats.io para mapas interactivos o sistema manual de asientos
+  </Card>
+  <Card title="Entradas de Cortesía" icon="gift" href="/features/courtesy-tickets">
+    Sistema dedicado para gestionar entradas gratuitas y promocionales
+  </Card>
+  <Card title="Múltiples Taquillas" icon="building" href="/features/offices">
+    Soporte para múltiples puntos de venta con control de acceso
+  </Card>
+  <Card title="Métodos de Pago" icon="credit-card" href="/payments/methods">
+    Pago móvil, tarjetas de crédito/débito, efectivo y transferencias
+  </Card>
+  <Card title="Cálculo de Impuestos" icon="percent" href="/payments/taxes">
+    IVA (16%) e IGTF (3%) calculados automáticamente según el método de pago
+  </Card>
+  <Card title="Clientes Corporativos" icon="briefcase" href="/payments/corporate">
+    Precios especiales y facturación para empresas
+  </Card>
+</CardGroup>
+
+## Integraciones Potentes
+
+TMT integra las mejores herramientas para ofrecer una experiencia completa:
+
+<CardGroup cols={3}>
+  <Card title="Firebase" icon="fire" href="/integrations/firebase">
+    Autenticación y base de datos en tiempo real
+  </Card>
+  <Card title="Seats.io" icon="map" href="/integrations/seatsio">
+    Mapas interactivos de asientos para eventos
+  </Card>
+  <Card title="Correo Electrónico" icon="envelope" href="/integrations/email">
+    Confirmaciones automáticas con detalles de compra
+  </Card>
+</CardGroup>
+
+## Comenzar es Fácil
+
+<Steps>
+  <Step title="Instalación">
+    Clona el repositorio y configura las dependencias
+    
+    ```bash
+    git clone <repository-url>
+    cd tmt-taquilla-fisica
+    npm install
+    ```
+  </Step>
+  
+  <Step title="Configuración">
+    Configura Firebase y las variables de entorno necesarias
+    
+    ```bash
+    # Copia el archivo de configuración
+    cp .env.example .env
+    
+    # Edita .env con tus credenciales
+    ```
+  </Step>
+  
+  <Step title="Desarrollo">
+    Inicia el servidor de desarrollo
+    
+    ```bash
+    npm run dev
+    ```
+  </Step>
+</Steps>
+
+<Card title="Guía de Inicio Rápido" icon="rocket" href="/quickstart" horizontal>
+  Sigue nuestra guía detallada para configurar tu primera taquilla
+</Card>
+
+## Tecnologías Utilizadas
+
+TMT está construido con tecnologías modernas y confiables:
+
+- **React 18** - Framework de interfaz de usuario
+- **Vite** - Build tool ultrarrápido
+- **Redux Toolkit** - Gestión de estado global
+- **Firebase** - Backend as a Service
+- **Tailwind CSS** - Framework de estilos utilitarios
+- **PrimeReact** - Componentes UI avanzados
+- **Formik + Yup** - Gestión y validación de formularios
+- **Seats.io** - Selección de asientos interactiva
+
+## ¿Necesitas Ayuda?
+
+<CardGroup cols={2}>
+  <Card title="Documentación" icon="book" href="/quickstart">
+    Explora la documentación completa
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/Zeto96/Tmt-doc-3">
+    Visita el repositorio del proyecto
+  </Card>
+</CardGroup>
