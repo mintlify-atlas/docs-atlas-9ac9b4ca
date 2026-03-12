@@ -1,0 +1,120 @@
+{
+  "projectType": "saas",
+  "projectName": "TMT - Taquilla Física",
+  "projectDescription": "Sistema de taquilla física para venta de entradas de eventos con gestión de pagos, asientos y clientes corporativos",
+  "theme": "almond",
+  "primaryColor": "#7c3aed",
+  "lightColor": "#9f68ff",
+  "darkColor": "#6d28d9",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentación",
+        "groups": [
+          {
+            "group": "Inicio",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Características Principales",
+            "pages": [
+              "features/events",
+              "features/checkout",
+              "features/seat-selection",
+              "features/courtesy-tickets",
+              "features/offices"
+            ]
+          },
+          {
+            "group": "Gestión de Pagos",
+            "pages": [
+              "payments/overview",
+              "payments/methods",
+              "payments/taxes",
+              "payments/corporate"
+            ]
+          },
+          {
+            "group": "Integraciones",
+            "pages": [
+              "integrations/firebase",
+              "integrations/seatsio",
+              "integrations/email"
+            ]
+          },
+          {
+            "group": "Autenticación y Seguridad",
+            "pages": [
+              "auth/overview",
+              "auth/guards",
+              "auth/permissions"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Componentes",
+        "groups": [
+          {
+            "group": "UI Components",
+            "pages": [
+              "components/overview",
+              "components/forms",
+              "components/buttons",
+              "components/cards"
+            ]
+          },
+          {
+            "group": "Application Components",
+            "pages": [
+              "components/events-list",
+              "components/checkout-form",
+              "components/seat-selector",
+              "components/payment-methods"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Estado y Redux",
+        "groups": [
+          {
+            "group": "State Management",
+            "pages": [
+              "redux/overview",
+              "redux/slices",
+              "redux/persistence"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Venta de entradas en taquilla física",
+    "Gestión de eventos y asientos",
+    "Múltiples métodos de pago (móvil, tarjetas, efectivo)",
+    "Integración con Seats.io para selección de asientos",
+    "Sistema de entradas de cortesía",
+    "Clientes corporativos con precios especiales",
+    "Cálculo automático de impuestos (IVA, IGTF)",
+    "Confirmación por correo electrónico",
+    "Autenticación con Firebase",
+    "Gestión de múltiples taquillas"
+  ],
+  "publicApiSurface": [
+    "tickets_list_event_sales",
+    "order_created",
+    "tickets_lock",
+    "tickets_unlock_param",
+    "send_email",
+    "hold_seats_seatsio",
+    "release_seats_seatsio",
+    "expire_hold_token_seatsio",
+    "book_seats_seatsio"
+  ]
+}
